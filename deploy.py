@@ -1,13 +1,13 @@
 # to use this, you must have a `.env` file that contains a `KEY` environment variable
 
+import os
 from contextlib import suppress, redirect_stdout
 from dataclasses import dataclass
 from io import StringIO
-import os
 from pathlib import Path
 from shutil import copy
 from subprocess import Popen, call, PIPE
-from sys import argv
+from sys import argv, exit
 
 
 @dataclass
@@ -37,11 +37,9 @@ startup_dir = Path(
 symlink_path = startup_dir/name
 exe_name = f'{name}.exe'
 exe_file = DeployFile(Path(cur_location, 'target/release', exe_name), dest/exe_name)
-files_to_deploy = [
-    exe_file,                                                             # exe file
-    DeployFile(cur_location/'Rocket.toml', dest/'Rocket.toml'),  # rocket config file
-    DeployFile(cur_location/'.env', dest/'.env'),                      # .env file
-]
+dot_env_file = DeployFile(cur_location/'.env', dest/'.env')
+rocket_config_file = DeployFile(cur_location/'Rocket.toml', dest/'Rocket.toml')
+files_to_deploy = [exe_file, rocket_config_file, dot_env_file]
 
 
 class ProccessKillError(Exception):
@@ -56,6 +54,11 @@ def print_usage():
                     f'    -k, --kill    Kill the {name} process currently running (if there is one) then exit.')))
 
 
+def exit_with_err(msg: str, end='\n'):
+    print(f'Error: {msg}', end)
+    exit()
+
+
 def kill_proccess(name: str):
     with StringIO() as buf, redirect_stdout(buf):
         p = Popen(['taskkill', '/f', '/im', name], stdout=PIPE, stderr=PIPE)
@@ -68,7 +71,15 @@ def build():
     call(['cargo', 'build', '--release', '--manifest-path', str(cur_location/'Cargo.toml')])
 
 
+def handle_invalid_config():
+    if os.getenv('KEY') is None and 'KEY' not in dot_env_file.src.read_text():
+        exit_with_err('no environment variable set or presence in `.env` for `KEY`')
+    if not rocket_config_file.src.exists():
+        exit_with_err('no `Rocket.toml` present')
+
+
 def main():
+    handle_invalid_config()
     success_msg = f'Process {exe_name} started'
 
     with suppress(IndexError):
