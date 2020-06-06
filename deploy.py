@@ -68,7 +68,7 @@ def kill_proccess(name: str):
 
 
 def build():
-    call(['cargo', 'build', '--release', '--manifest-path', str(cur_location/'Cargo.toml')])
+    call(['cargo', '+nightly', 'build', '--release', '--manifest-path', str(cur_location/'Cargo.toml')])
 
 
 def handle_invalid_config():

@@ -1,5 +1,5 @@
 #![windows_subsystem = "windows"]
-#![feature(decl_macro, proc_macro_hygiene)]
+#![feature(decl_macro)]
 
 use std::cmp;
 use std::convert::TryFrom;
