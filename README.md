@@ -14,3 +14,5 @@ Do not use this on untrusted networks.
 Note also that this is prone to breaking during time changes as it uses the time delta as a nonce. This
 may change in the future, but such functionality is heavily limited by the limitations of the Shortcuts
 app.
+
+TODO: put something about setting up the cronjob here (put it in the readme rewrite branch)

@@ -20,7 +20,7 @@ mod util;
 const ALLOWABLE_TIME_DIFFERENCE: Duration = Duration::from_secs(2);
 static LAST_USED_NONCE: AtomicU64 = AtomicU64::new(0);
 lazy_static! {
-    static ref KEY: String = dotenv::var("KEY").expect("No key is set in `.env`");
+    static ref KEY: String = dotenv::var("KEY").expect("No environment variable set for `KEY`");
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -219,6 +219,7 @@ fn time_since_epoch() -> u64 {
 
 fn main() {
     Nonce::initialize_last_used();
+    // std::fs::write("C:/Users/liamh/Desktop/rclog.txt", std::env::current_dir().unwrap().display().to_string()).unwrap();
 
     rocket::ignite()
         .mount("/", routes![sleep, sleep_display, minimize])
