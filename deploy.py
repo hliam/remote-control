@@ -1,4 +1,4 @@
-# to use this, you must have a `.env` file that contains a `KEY` environment variable
+# To use this, you must have a `.env` file that contains a `KEY` environment variable.
 
 import os
 from contextlib import suppress, redirect_stdout
@@ -47,7 +47,7 @@ class ProccessKillError(Exception):
 
 
 def print_usage():
-    print('\n'.join(('This script will start start the program as well as add it to the startup directory',
+    print('\n'.join(('This script will start the program and add it to the startup directory',
                      '\n\nusage: py deploy_win.py [options]',
                      '\noptions:',
                      '    -h, --help    Show this help information.',

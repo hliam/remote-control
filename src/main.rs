@@ -4,6 +4,7 @@
 use std::cmp;
 use std::convert::TryFrom;
 use std::fmt;
+use std::io::Cursor;
 use std::str::FromStr;
 use std::string::ToString;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lazy_static::lazy_static;
 use rocket::request::Outcome;
-use rocket::{get, http::Status, request, routes};
+use rocket::{get, http::ContentType, http::Status, request, response::Response, routes};
 use sha2::{Digest, Sha512};
 
 mod util;
@@ -184,7 +185,7 @@ fn ping(_secret: Secret) -> Status {
 
 #[get("/sleep")]
 fn sleep(_secret: Secret) -> Status {
-    // always returns Status::Accepted, even if it failed
+    // Always returns Status::Accepted, even if it failed.
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(10));
         util::sleep_computer();
@@ -208,6 +209,14 @@ fn minimize(_secret: Secret) -> Status {
     }
 }
 
+#[get("/screenshot")]
+fn screenshot<'a>(_secret: Secret) -> Response<'a> {
+    Response::build()
+        .header(ContentType::PNG)
+        .sized_body(Cursor::new(util::take_screenshot()))
+        .finalize()
+}
+
 /// Return the time, in seconds, since the epoch (the Unix epoch is used).
 fn time_since_epoch() -> u64 {
     (SystemTime::now()
@@ -221,6 +230,6 @@ fn main() {
     Nonce::initialize_last_used();
 
     rocket::ignite()
-        .mount("/", routes![sleep, sleep_display, minimize])
+        .mount("/", routes![sleep, sleep_display, minimize, screenshot])
         .launch();
 }
