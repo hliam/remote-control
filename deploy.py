@@ -1,3 +1,4 @@
+from abc import ABC
 import argparse
 import os
 from contextlib import suppress, redirect_stdout
@@ -7,11 +8,8 @@ from shutil import copy
 from subprocess import check_call, DEVNULL, Popen, PIPE
 from sys import exit, platform
 
-try:
+if not platform == 'win32':
     import crontab
-except ImportError:
-    if not platform == 'win32':
-        raise
 
 
 name = 'remote_control'
@@ -35,7 +33,12 @@ class DeployFile:
     else:
         dst_base = Path('~/Library/Application Support', name).expanduser()
 
-    def __init__(self, src: Path, dst: Path = None, full_src_path: bool = False, full_dst_path: bool = False):
+    def __init__(
+        self, src: os.PathLike,
+        dst: os.PathLike = None,
+        full_src_path: bool = False,
+        full_dst_path: bool = False
+    ):
         if dst is None:
             dst = src
         self.src = src if full_src_path else DeployFile.src_base / src
@@ -58,6 +61,7 @@ if platform == 'win32':
     exe_name = f'{name}.exe'
 else:
     exe_name = name
+
 exe_file = DeployFile(Path('target/release', exe_name), exe_name)
 dot_env_file = DeployFile('.env')
 rocket_config_file = DeployFile('Rocket.toml')
@@ -73,26 +77,45 @@ else:
 
 
 class ProcessKillError(Exception):
-    def __init__(self, message):
+    def __init__(self, message: str):
         self.message = message
 
 
-# for macOS, python-crontab is used. for windows, we put a symlink in the startup folder.
+class NotScheduledError(Exception):
+    def __init__(self):
+        super().__init__('No job is scheduled.')
+
+
+# On windows, we put a symlink in the startup folder to schedule running at startup.
 # TODO: change this comment to reflect whatever ends up in the startup folder (not a symlink)
-class Scheduler:
-    if not platform == 'win32':
-        _cron = crontab.CronTab(True)
+class _WindowsScheduler:
+    @classmethod
+    def is_scheduled(cls) -> bool:
+        return start_script.dst.exists()
 
     @classmethod
-    def _raise_unscheduled_error(cls):
-        raise ValueError('no job is scheduled')
+    def schedule(cls):
+        start_script.deploy()
+
+    @classmethod
+    def unschedule(cls):
+        try:
+            start_script.dst.unlink()
+        except FileNotFoundError:
+            raise NotScheduledError()
+
+
+# On macOS, we use python-crontab to schedule running at startup.
+class _MacOSScheduler:
+    if not platform == 'win32':
+        self._cron = crontab.CronTab(True)
 
     @classmethod
     def _get_command(cls) -> str:
         return str(start_script.dst)
 
     @classmethod
-    def _find_cron_command(cls):
+    def _get_cron_command(cls):
         try:
             return next(cls._cron.find_command(cls._get_command()))
         except StopIteration:
@@ -100,61 +123,65 @@ class Scheduler:
 
     @classmethod
     def is_scheduled(cls) -> bool:
-        if platform == 'win32':
-            return start_script.dst.exists()
-        return cls._find_cron_command() is not None
+        return cls._get_cron_command() is not None
 
     @classmethod
     def schedule(cls):
-        if platform == 'win32':
-            start_script.deploy()
-        else:
-            with cls._cron as cron:
-                cron.new(command=cls._get_command()).every_reboot()
+        with cls._cron as cron:
+            cron.new(command=cls._get_command()).every_reboot()
 
     @classmethod
     def unschedule(cls):
-        if platform == 'win32':
-            try:
-                start_script.dst.unlink()
-            except FileNotFoundError:
-                cls._raise_unscheduled_error()
-        else:
-            try:
-                with cls._cron as cron:
-                    cron.remove(cls._find_cron_command())
-            except TypeError:
-                cls._raise_unscheduled_error()
+        try:
+            cron.remove(cls._get_cron_command())
+        except TypeError:
+            raise NotScheduledError()
+
+
+Scheduler = _WindowsScheduler if platform == 'win32' else _MacOSScheduler
 
 
 def exit_with_err(msg: str):
+    """Print an error to the console then exit."""
     print(f'[error] {msg}')
     exit()
 
 
 def print_info(msg: str):
+    """Print general information to console."""
     print(f'[info] {msg}')
 
 
 def kill_process(name: str):
+    """Kill the remote-control process.
+
+    Raises:
+        ProcessKillError: If the process isn't running or if something
+            else went wrong trying to kill it.
+    """
     with StringIO() as buf, redirect_stdout(buf):
         if platform == 'win32':
             args = ['taskkill', '/f', '/im', name]
         else:
+            # Detect if the process is running.
             if not Popen(['pgrep', name], stdout=PIPE).stdout.read():
-                raise ProcessKillError(f'process isn\'t running')
+                raise ProcessKillError('Process isn\'t running.')
             args = ['pkill', '-9', name]
 
         err_msg = Popen(args, stdout=PIPE, stderr=PIPE).stderr.read()
+        # There will be an error on windows if the process isn't running, right now it isn't distinguished if the call
+        # failed because the process doesn't exist or because something went wrong. This should probably be fixed. TODO.
         if err_msg:
-            raise ProcessKillError(f'something went wrong trying to kill the process ({buf!s})')
+            raise ProcessKillError(f'Something went wrong trying to kill the process ({buf!s}).')
 
 
 def build():
+    """Build with cargo."""
     check_call(['cargo', 'build', '--release', '--manifest-path', str(DeployFile.src_base / 'Cargo.toml')])
 
 
 def get_args():
+    """Get the program arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument('-k', '--kill', action='store_true',
                         help='kill the running remote-control process then exit')
@@ -166,16 +193,26 @@ def get_args():
 
 
 def handle_invalid_config():
-    try:
-        if os.getenv('KEY') is None and 'KEY' not in dot_env_file.src.read_text():
-            exit_with_err('no environment variable set or present in `.env` for `KEY`')
-    except FileNotFoundError:
-        exit_with_err("no environment variable set and no `.env` file in project folder")
+    """Detect and handle an invalid config.
+
+    This will handle the lack of a key or `rocket.toml` and exit the
+    program accordingly.
+    """
     if not rocket_config_file.src.exists():
-        exit_with_err('no `Rocket.toml` present')
+        exit_with_err('No `Rocket.toml` present.')
+
+    with suppress(FileNotFoundError):
+        if os.getenv('KEY') is not None or 'KEY' in dot_env_file.src.read_text():
+            return
+
+    exit_with_err("Key not in environment or `.env` file.")
 
 
-def execute_file(path: os.PathLike, in_background=False):
+def execute_file(path: os.PathLike, in_background: bool = False):
+    """Execute a file.
+
+    This function blocks unless `in_background` is true.
+    """
     if in_background:
         Popen([path], shell=False, stdout=DEVNULL)
     else:
@@ -183,6 +220,11 @@ def execute_file(path: os.PathLike, in_background=False):
 
 
 def uninstall():
+    """Uninstall remote control, deleting all files.
+
+    This will kill the process, remove installed files, and unschedule
+    run at startup.
+    """
     with suppress(ProcessKillError):
         kill_process(exe_name)
         print_info('process killed')
@@ -195,16 +237,22 @@ def uninstall():
         file.dst_base.rmdir()
         print_info('removed deployment files and directory')
 
-    with suppress(ValueError):
+    with suppress(NotScheduledError):
         Scheduler.unschedule()
-        print_info('unscheduled process run at startup')
+        print_info('unscheduled run at startup')
 
     print_info(f'{name} has been uninstalled')
 
 
-def deploy():
+def deploy_all():
+    """Deploy remote control.
+
+    This will kill previous instances, build the program, deploy
+    necessary filed to the install location, then run the program.
+    """
     with suppress(FileExistsError):
         DeployFile.dst_base.mkdir()
+
     build()
 
     with suppress(ProcessKillError):
@@ -219,7 +267,7 @@ def deploy():
         print_info('scheduled process to run at startup')
 
     execute_file(exe_file.dst, True)
-    print_info(f'process started')
+    print_info('process started')
 
 
 def main():
@@ -238,7 +286,7 @@ def main():
     elif args.uninstall:
         uninstall()
     else:
-        deploy()
+        deploy_all()
 
 
 if __name__ == '__main__':
