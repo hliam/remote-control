@@ -8,7 +8,6 @@ use std::io::Cursor;
 use std::str::FromStr;
 use std::string::ToString;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lazy_static::lazy_static;
@@ -110,6 +109,7 @@ impl Nonce {
 
 impl TryFrom<&request::Request<'_>> for Nonce {
     type Error = Error;
+
     fn try_from(r: &request::Request) -> Result<Self, Self::Error> {
         match r.headers().get_one("Nonce") {
             Some(n) => Nonce::from_str(n),
@@ -120,6 +120,7 @@ impl TryFrom<&request::Request<'_>> for Nonce {
 
 impl FromStr for Nonce {
     type Err = Error;
+
     fn from_str(s: &str) -> Result<Self, Error> {
         s.parse::<u64>().map(Self).map_err(|_| Error::Invalid)
     }
@@ -186,10 +187,7 @@ fn ping(_secret: Secret) -> Status {
 #[get("/sleep")]
 fn sleep(_secret: Secret) -> Status {
     // Always returns Status::Accepted, even if it failed.
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(10));
-        util::sleep_computer();
-    });
+    util::run_in_background_on_delay(&util::sleep_computer);
 
     Status::Accepted
 }
@@ -221,7 +219,7 @@ fn screenshot<'a>(_secret: Secret) -> Response<'a> {
 fn time_since_epoch() -> u64 {
     (SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::from_secs(0))
+        .unwrap_or_else(|_| Duration::from_secs(0))
         + ALLOWABLE_TIME_DIFFERENCE)
         .as_secs()
 }
