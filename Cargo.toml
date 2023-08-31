@@ -2,14 +2,17 @@
 name = "remote_control"
 version = "0.1.0"
 authors = ["Liam Henrickson <liam.henrickson@gmail.com>"]
-edition = "2018"
+edition = "2021"
+
+[features]
+# Enabling this (via `cargo build --features no_term`) will run the program without the terminal.
+no_term = []
 
 [dependencies]
-dotenv = "0.15"
+chrono = "0.4"
+dotenvy = "0.15"
 hex = "0.4"
-lazy_static = "1.4"
-repng = "0.2"
-rocket = "0.4.9"
+image = "0.24"
+screenshots = "0.8"
 sha2 = "0.8"
-scrap = "0.5"
-winapi = { version = "0.3", features = ["winuser", "powrprof"] }
+winapi = { version = "0.3", features = ["powrprof", "winuser"] }

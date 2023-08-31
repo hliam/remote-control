@@ -8,6 +8,7 @@ from pathlib import Path
 from shutil import copy
 from subprocess import Popen, call, PIPE
 from sys import argv, exit
+import tomllib
 
 
 @dataclass
@@ -29,14 +30,16 @@ class DeployFile:
 # - make this deploy script work when called from any location
 # - clean these up
 cur_location = Path(__file__).parent.absolute()
-name = 'remote_control'
+# We get the exe name from the Cargo.toml
+name = tomllib.loads(Path('Cargo.toml').read_text())['package']['name']
 dest = Path('~/AppData/Local', name).expanduser()
 startup_dir = Path(
     '~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup').expanduser()
 
 symlink_path = startup_dir/name
 exe_name = f'{name}.exe'
-exe_file = DeployFile(Path(cur_location, 'target/release', exe_name), dest/exe_name)
+exe_file = DeployFile(
+    Path(cur_location, 'target/release', exe_name), dest/exe_name)
 dot_env_file = DeployFile(cur_location/'.env', dest/'.env')
 rocket_config_file = DeployFile(cur_location/'Rocket.toml', dest/'Rocket.toml')
 files_to_deploy = [exe_file, rocket_config_file, dot_env_file]
@@ -68,25 +71,26 @@ def kill_proccess(name: str):
 
 
 def build():
-    call(['cargo', 'build', '--release', '--manifest-path', str(cur_location/'Cargo.toml')])
+    call(['cargo', 'build', '--release', '--features', 'no_term', '--manifest-path',
+         str(cur_location/'Cargo.toml')])
 
 
 def handle_invalid_config():
-    if os.getenv('KEY') is None and 'KEY' not in dot_env_file.src.read_text():
-        exit_with_err('no environment variable set or presence in `.env` for `KEY`')
-    if not rocket_config_file.src.exists():
-        exit_with_err('no `Rocket.toml` present')
+    if os.getenv('REMOTE_CONTROL_KEY') is None and 'REMOTE_CONTROL_KEY' not in dot_env_file.src.read_text():
+        exit_with_err(
+            'no environment variable set or presence in `.env` for `REMOTE_CONTROL_KEY`')
 
 
 def main():
     handle_invalid_config()
+    args = argv[1:]
     success_msg = f'Process {exe_name} started'
 
     with suppress(IndexError):
-        if argv[1] in ('-h', '--help'):
+        if '-h' in args or '--help' in args:
             print_usage()
             return
-        if argv[1] in ('-k', '--kill'):
+        if '-k' in args or '--kill' in args:
             with suppress(ProccessKillError):
                 kill_proccess(exe_name)
             return
