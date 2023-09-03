@@ -28,8 +28,7 @@ fn main() {
     let logger = DebugLogger {};
     #[cfg(not(debug_assertions))]
     let logger = DummyLogger {};
-
-    Server::from_env(logger)
+    let err = Server::from_env(logger)
         .expect("key can't be empty")
         .run(|r| match r.path.as_str() {
             "/minimize" => {
@@ -51,5 +50,11 @@ fn main() {
                 Response::from_status(404)
             }
         })
-        .expect("failed to run server");
+        .unwrap_err();
+
+    if err.kind() == std::io::ErrorKind::AddrInUse {
+        eprintln!("Error: server socket is already in use--is another instance running?");
+    } else {
+        panic!("{}", err);
+    }
 }
