@@ -168,6 +168,7 @@ mod private {
     /// Upon trying to update a nonce with `Nonce::begin_update`, you'll get a
     /// `NonceValidityWitness` that can be used to finishing updating the value of the `Nonce` with
     /// it's `finalize_update` method. See `Nonce::begin_update` for more documentation.
+    #[must_use = "Call `finalize_update` method to update nonce, see `Nonce::begin_update` for info."]
     #[derive(Debug)]
     pub struct NonceValidityWitness<'a>(&'a mut Nonce, u64, ());
     impl NonceValidityWitness<'_> {
