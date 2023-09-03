@@ -320,7 +320,7 @@ impl<L: Logger> Server<L> {
     /// Run the server.
     ///
     /// This function will only exit if an error occurs.
-    pub fn run(&self, f: &impl Fn(Request) -> Response) -> Result<(), std::io::Error> {
+    pub fn run(&self, f: impl Fn(Request) -> Response) -> Result<(), std::io::Error> {
         let mut buf = vec![0u8; 4096];
         let mut nonce = Nonce::new(Duration::from_secs(2));
         let listener = TcpListener::bind(self.addr)?;
@@ -336,6 +336,7 @@ impl<L: Logger> Server<L> {
                 .and_then(|_| stream.set_write_timeout(Some(Duration::from_secs(2))))
                 .log(&self.logger)
             {
+                let _ = stream.shutdown(Shutdown::Both).log(&self.logger);
                 continue;
             };
 
@@ -344,6 +345,7 @@ impl<L: Logger> Server<L> {
                 .ok()
                 .flatten()
                 .map(|r| f(r).write_to(&mut stream));
+            let _ = stream.shutdown(Shutdown::Both).log(&self.logger);
         }
 
         panic!();
@@ -404,6 +406,14 @@ impl TryFrom<&str> for Method {
             "POST" => Ok(Self::Post),
             _ => Err(RequestError::MalformedHttp),
         }
+    }
+}
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+        })
     }
 }
 

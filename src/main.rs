@@ -31,7 +31,7 @@ fn main() {
 
     Server::from_env(logger)
         .expect("key can't be empty")
-        .run(&|r| match r.path.as_str() {
+        .run(|r| match r.path.as_str() {
             "/minimize" => {
                 util::minimize_windows();
                 Response::from_status(200)
