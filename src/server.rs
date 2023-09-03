@@ -114,7 +114,7 @@ mod private {
     /// A server's nonce.
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Nonce {
-        inner: u64,
+        inner: u128,
         /// The time into the future that an allowable nonce can be.
         pub leeway: Duration,
         _private: (),
@@ -128,7 +128,7 @@ mod private {
                 inner: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("current time is before unix epoch")
-                    .as_secs(),
+                    .as_millis(),
                 leeway,
                 _private: (),
             }
@@ -152,10 +152,13 @@ mod private {
         /// witness.finalize_update()
         /// ```
         #[must_use]
-        pub fn begin_update(&mut self, new_nonce: u64) -> Result<NonceValidityWitness, NonceError> {
+        pub fn begin_update(
+            &mut self,
+            new_nonce: u128,
+        ) -> Result<NonceValidityWitness, NonceError> {
             if new_nonce <= self.inner {
                 Err(NonceError::FromPast)
-            } else if new_nonce > (Duration::since_unix_epoch() + self.leeway).as_secs() {
+            } else if new_nonce > (Duration::since_unix_epoch() + self.leeway).as_millis() {
                 Err(NonceError::FromFuture)
             } else {
                 Ok(NonceValidityWitness(self, new_nonce, ()))
@@ -170,13 +173,44 @@ mod private {
     /// it's `finalize_update` method. See `Nonce::begin_update` for more documentation.
     #[must_use = "Call `finalize_update` method to update nonce, see `Nonce::begin_update` for info."]
     #[derive(Debug)]
-    pub struct NonceValidityWitness<'a>(&'a mut Nonce, u64, ());
+    pub struct NonceValidityWitness<'a>(&'a mut Nonce, u128, ());
     impl NonceValidityWitness<'_> {
         /// Finishes updating the `Nonce`.
         ///
         /// See `Nonce::begin_update` for more documentation.
         pub fn finalize_update(self) {
             self.0.inner = self.1;
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::time::Duration;
+
+        use super::{
+            super::{DurationExt, NonceError},
+            Nonce,
+        };
+
+        #[test]
+        fn test_nonce() {
+            let now = Duration::since_unix_epoch().as_millis();
+            let mut nonce = Nonce {
+                inner: now,
+                leeway: Duration::from_secs(2),
+                _private: (),
+            };
+
+            assert_eq!(
+                nonce.begin_update(now - 1).unwrap_err(),
+                NonceError::FromPast
+            );
+            assert_eq!(
+                nonce.begin_update(now + 5000).unwrap_err(),
+                NonceError::FromFuture
+            );
+            nonce.begin_update(now + 1).unwrap().finalize_update();
+            assert_eq!(nonce.inner, now + 1);
         }
     }
 }
@@ -202,7 +236,7 @@ impl Key {
     ///
     /// Note: The base64 string is unpadded.
     #[must_use]
-    pub(super) fn generate_secret(&self, nonce: u64) -> String {
+    pub(super) fn generate_secret(&self, nonce: u128) -> String {
         let mut hasher = Sha512::new();
         hasher.input(nonce.to_string());
         hasher.input(&self.0);
@@ -462,7 +496,7 @@ impl Request {
             .find(|(k, _)| *k == "Secret")
             .ok_or(MissingSecret)?
             .1;
-        let nonce: u64 = lines
+        let nonce: u128 = lines
             .iter()
             .find(|(k, _)| *k == "Nonce")
             .ok_or(MissingNonce)?
@@ -651,4 +685,123 @@ impl Response {
     }
 }
 
-// TODO: add tests
+#[cfg(test)]
+mod tests {
+    /// Generates the http of what a response should look like from status and content.
+    fn format_http_response(status: u16, content: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\n{}Content-Length: {}\r\n\r\n{content}",
+            if content.is_empty() {
+                ""
+            } else {
+                "Content-Type: text/plain; charset=utf-8\r\n"
+            },
+            content.len(),
+        )
+    }
+
+    #[test]
+    fn test_server() {
+        use std::io::{Read, Write};
+        use std::net::{Ipv4Addr, SocketAddrV4};
+        use std::thread;
+        use std::time::Duration;
+
+        use super::{
+            DummyLogger, DurationExt, Key, Method, Request, RequestError, Response, Server,
+        };
+
+        struct ClientMock {
+            dst_addr: SocketAddrV4,
+            key: Key,
+            buf: Vec<u8>,
+        }
+
+        impl ClientMock {
+            fn new(dst_addr: SocketAddrV4, key: Key) -> Self {
+                Self {
+                    dst_addr,
+                    key,
+                    buf: vec![0; 4096],
+                }
+            }
+
+            fn send_request(&mut self, method: Method, path: &str) -> String {
+                // We sleep to make sure the nonce is different.
+                thread::sleep(Duration::from_millis(1));
+                let mut stream = std::net::TcpStream::connect(self.dst_addr).unwrap();
+                let nonce = Duration::since_unix_epoch().as_millis();
+                let http = format!(
+                    "{method} {path} HTTP/1.1\r\nContent-Length: 0\r\nNonce: {nonce}\r\nSecret: \
+                     {}\r\n\r\n",
+                    self.key.generate_secret(nonce)
+                );
+
+                stream.write_all(http.as_bytes()).unwrap();
+                // The server writes the headers and content with two separate `write` calls, and if
+                // we read immediately without waiting first, we'll only get the first `write` call.
+                thread::sleep(Duration::from_millis(1));
+                let len = stream.read(&mut self.buf).unwrap();
+                String::from_utf8_lossy(&self.buf[0..len]).to_string()
+            }
+        }
+
+        // We can't use a random port (port 0) because it gets chosen when bound, at which point
+        // it's opaque in the server's `run` method. So we just use this port instead. Call it
+        // compile-time random. https://xkcd.com/221.
+        let server_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 35621);
+        let key = Key::new("this is a key").unwrap();
+        let mut client = ClientMock::new(server_addr, key.clone());
+        let server = Server::from_addr(server_addr, key.clone(), DummyLogger::new());
+
+        let server_res = std::thread::spawn(move || {
+            server
+                .run(|r| match r {
+                    Request {
+                        method: Method::Get,
+                        path,
+                    } if path == "/test1" => Response::from_status(200),
+                    Request {
+                        method: Method::Post,
+                        path,
+                    } if path == "/test2" => {
+                        Response::from_message(400, "this is a message".to_owned())
+                    }
+                    Request { method, path } => panic!("received {} request to {}", method, path),
+                })
+                .unwrap();
+        });
+
+        assert_eq!(
+            client.send_request(Method::Get, "/test1"),
+            format_http_response(200, "")
+        );
+        assert_eq!(
+            client.send_request(Method::Post, "/test2"),
+            format_http_response(400, "this is a message")
+        );
+
+        // We switch to an invalid key.
+        client.key = Key::new("a different key").unwrap();
+
+        assert_eq!(
+            client.send_request(Method::Get, "/invalid_endpoint"),
+            format_http_response(401, &RequestError::InvalidKey.to_string())
+        );
+
+        // Switch back to valid key.
+        client.key = key;
+
+        // Stop the server by sending it a request to an unexpected endpoint, causing it to panic.
+        client.send_request(Method::Get, "/stop");
+
+        // Pull the value out of the threads panic and ignore it if it's our stop request, otherwise
+        // reraise it.
+        if let Err(e) = server_res.join() {
+            match e.downcast::<String>() {
+                Ok(s) if *s == "received GET request to /stop" => (),
+                i => panic!("{:?}", i),
+            }
+        }
+    }
+}
