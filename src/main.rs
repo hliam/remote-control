@@ -13,9 +13,9 @@ impl server::Logger for DebugLogger {
     fn info(&self, msg: &str) {
         println!("[{} info] {msg}", chrono::Local::now().format("%-H:%M:%S"));
     }
-    fn connection_closed(&self, msg: &str) {
+    fn connection_refused(&self, msg: &str) {
         println!(
-            "[{} connection closed] {msg}",
+            "[{} connection refused] {msg}",
             chrono::Local::now().format("%-H:%M:%S")
         );
     }
@@ -28,7 +28,8 @@ fn main() {
     let logger = DebugLogger {};
     #[cfg(not(debug_assertions))]
     let logger = DummyLogger {};
-    let err = Server::from_env(logger)
+
+    let err = Server::from_env("REMOTE_CONTROL_KEY", "REMOTE_CONTROL_PORT", logger)
         .expect("key can't be empty")
         .run(|r| match r.path.as_str() {
             "/minimize" => {
@@ -46,7 +47,7 @@ fn main() {
             }
             "/screenshot" => util::take_screenshot().into_response(Response::from_png),
             other => {
-                logger.connection_closed(&format!("Invalid endpoint requested: \"{other}\""));
+                logger.connection_refused(&format!("Invalid endpoint requested: \"{other}\""));
                 Response::from_status(404)
             }
         })

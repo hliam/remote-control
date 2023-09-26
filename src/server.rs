@@ -38,7 +38,7 @@ impl<T, E: fmt::Display> ResultExt<T, E> for Result<T, E> {
 
     fn log(self, logger: &impl Logger) -> Self {
         if let Err(e) = &self {
-            logger.connection_closed(&e.to_string());
+            logger.connection_refused(&e.to_string());
         }
         self
     }
@@ -62,7 +62,7 @@ pub trait Logger: fmt::Debug {
     /// Log general information about the server such as listening on a port.
     fn info(&self, msg: &str);
     /// Log that a connection was closed outside of normal circumstance, such as for an invalid key.
-    fn connection_closed(&self, msg: &str);
+    fn connection_refused(&self, msg: &str);
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -76,7 +76,7 @@ impl DummyLogger {
 }
 impl Logger for DummyLogger {
     fn info(&self, _: &str) {}
-    fn connection_closed(&self, _: &str) {}
+    fn connection_refused(&self, _: &str) {}
 }
 
 pub use private::{Key, Nonce, NonceValidityWitness};
@@ -221,8 +221,8 @@ impl Key {
     /// This function will panic if the environment variable can't be found. If the string is
     /// empty, an error will be returned.
     #[must_use]
-    pub fn from_env() -> Result<Key, EmptyKeyError> {
-        dotenvy::var("REMOTE_CONTROL_KEY")
+    pub fn from_env(env_var_name: &str) -> Result<Key, EmptyKeyError> {
+        dotenvy::var(env_var_name)
             .expect("no key found in .env file")
             .try_into()
     }
@@ -342,9 +342,13 @@ impl<L: Logger> Server<L> {
 
     /// Creates a new `Server` with a key and port from a .env file.
     /// If you'd like to ignore log information, use an instance of `DummyLogger` as the logger.
-    pub fn from_env(logger: L) -> Result<Self, EmptyKeyError> {
-        Key::from_env().map(|key| {
-            let port = dotenvy::var("REMOTE_CONTROL_PORT")
+    pub fn from_env(
+        key_env_var: &str,
+        port_env_var: &str,
+        logger: L,
+    ) -> Result<Self, EmptyKeyError> {
+        Key::from_env(key_env_var).map(|key| {
+            let port = dotenvy::var(port_env_var)
                 .expect("port not found in .env file (set `REMOTE_CONTROL_PORT`)")
                 .parse()
                 .expect("port (set from .env) isn't valid; ports must be less than 65535");
@@ -400,7 +404,7 @@ impl<L: Logger> Server<L> {
         Ok(match Request::new(&buf, &self.key, last_nonce) {
             Err(e) => {
                 self.logger
-                    .connection_closed(&format!("Connection rejected for reason: {e}"));
+                    .connection_refused(&format!("Connection rejected for reason: {e}"));
                 Response::from(&e).write_to(stream)?;
                 stream.shutdown(Shutdown::Both)?;
                 None
