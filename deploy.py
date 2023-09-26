@@ -22,8 +22,7 @@ class DeployFile:
     def deploy(self):
         with suppress(FileNotFoundError):
             self.dest.unlink()
-        with suppress(FileNotFoundError):
-            copy(self.src, self.dest)
+        copy(self.src, self.dest)
 
 
 # TODO:
@@ -41,8 +40,7 @@ exe_name = f'{name}.exe'
 exe_file = DeployFile(
     Path(cur_location, 'target/release', exe_name), dest/exe_name)
 dot_env_file = DeployFile(cur_location/'.env', dest/'.env')
-rocket_config_file = DeployFile(cur_location/'Rocket.toml', dest/'Rocket.toml')
-files_to_deploy = [exe_file, rocket_config_file, dot_env_file]
+files_to_deploy = [exe_file, dot_env_file]
 
 
 class ProccessKillError(Exception):
