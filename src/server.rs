@@ -244,9 +244,9 @@ impl Key {
     #[must_use]
     pub(super) fn generate_secret(&self, nonce: u128) -> String {
         let mut hasher = Sha512::new();
-        hasher.input(nonce.to_string());
-        hasher.input(&self.0);
-        hex::encode(hasher.result())
+        hasher.update(nonce.to_string());
+        hasher.update(&self.0);
+        hex::encode(hasher.finalize())
     }
 }
 

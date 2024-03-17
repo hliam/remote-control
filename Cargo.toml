@@ -12,7 +12,6 @@ no_term = []
 chrono = "0.4"
 dotenvy = "0.15"
 hex = "0.4"
-image = "0.24"
 screenshots = "0.8"
-sha2 = "0.8"
+sha2 = "0.10"
 winapi = { version = "0.3", features = ["powrprof", "winuser"] }

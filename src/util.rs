@@ -1,9 +1,9 @@
 use std::os::windows::prelude::OsStrExt;
 use std::{ffi::OsStr, fmt};
+
+use screenshots::image::codecs::png;
 use winapi::shared::minwindef::{LPARAM, UINT, WPARAM};
 use winapi::{shared::windef::HWND, um::winuser};
-
-use image::codecs::png;
 
 /// A handle. This might be null.
 struct Hwnd(HWND);
