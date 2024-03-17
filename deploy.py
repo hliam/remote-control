@@ -27,7 +27,6 @@ class DeployFile:
 
 # TODO:
 # - make this deploy script work when called from any location
-# - clean these up
 cur_location = Path(__file__).parent.absolute()
 # We get the exe name from the Cargo.toml
 name = tomllib.loads(Path('Cargo.toml').read_text())['package']['name']
@@ -43,7 +42,11 @@ dot_env_file = DeployFile(cur_location/'.env', dest/'.env')
 files_to_deploy = [exe_file, dot_env_file]
 
 
-class ProccessKillError(Exception):
+class ProcessKillError(Exception):
+    pass
+
+
+class ProcessNotRunningError(ProcessKillError):
     pass
 
 
@@ -60,17 +63,19 @@ def exit_with_err(msg: str, end='\n'):
     exit()
 
 
-def kill_proccess(name: str):
+def kill_process(name: str):
     with StringIO() as buf, redirect_stdout(buf):
         p = Popen(['taskkill', '/f', '/im', name], stdout=PIPE, stderr=PIPE)
         err_msg = p.stderr.read()
         if err_msg:
-            raise ProccessKillError(str(buf))
+            if err_msg == f'ERROR: The process "{name}" not found.\r\n'.encode('utf-8'):
+                raise ProcessNotRunningError()
+            raise ProcessKillError(err_msg)
 
 
 def build():
     call(['cargo', 'build', '--release', '--features', 'no_term', '--manifest-path',
-         str(cur_location/'Cargo.toml')])
+          str(cur_location/'Cargo.toml')])
 
 
 def handle_invalid_config():
@@ -84,21 +89,23 @@ def main():
     args = argv[1:]
     success_msg = f'Process {exe_name} started'
 
-    with suppress(IndexError):
-        if '-h' in args or '--help' in args:
-            print_usage()
-            return
-        if '-k' in args or '--kill' in args:
-            with suppress(ProccessKillError):
-                kill_proccess(exe_name)
-            return
+    if '-h' in args or '--help' in args:
+        print_usage()
+        return
+    if '-k' in args or '--kill' in args:
+        try:
+            kill_process(exe_name)
+            print('Killed process')
+        except ProcessNotRunningError:
+            print('Process wasn\'t running')
+        return
 
     with suppress(FileExistsError):
         dest.mkdir()
     build()
 
-    with suppress(ProccessKillError):
-        kill_proccess(exe_name)
+    with suppress(ProcessKillError):
+        kill_process(exe_name)
         success_msg += ' & old process was killed'
 
     for deploy_file in files_to_deploy:

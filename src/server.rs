@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
-use std::io::{Read, Write};
+use std::fmt;
+use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{fmt, io};
 
 use sha2::{Digest, Sha512};
 
@@ -17,26 +17,28 @@ impl DurationExt for Duration {
     fn since_unix_epoch() -> Self {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::from_secs(0))
+            .unwrap_or_default()
     }
 }
 
 pub trait ResultExt<T, E> {
-    /// Create a `Response` of just a status code from this result.
+    /// Creates a `Response` of just a status code from this result.
     ///
-    /// The status code is set to 200 if `Ok`, otherwise `err_status_code` if `Err`.
-    fn into_response(&self, err_status_code: u16) -> Response;
-    /// Log the `Err` if there is one.
-    fn log(self, logger: &impl Logger) -> Self;
+    /// The status code is set to 200 if `Ok`, otherwise the status code is `err_status_code`.
+    #[must_use]
+    fn to_status_response(&self, err_status_code: u16) -> Response;
+    /// Logs that the connection was refused to `logger` if `Err`. Does nothing if `Ok`.
+    ///
+    /// The contained error is used as the log message.
+    fn log_connection_refused(self, logger: &impl Logger) -> Self;
 }
 
 impl<T, E: fmt::Display> ResultExt<T, E> for Result<T, E> {
-    #[must_use]
-    fn into_response(&self, err_status_code: u16) -> Response {
+    fn to_status_response(&self, err_status_code: u16) -> Response {
         Response::from_status(self.as_ref().map_or(err_status_code, |_| 200))
     }
 
-    fn log(self, logger: &impl Logger) -> Self {
+    fn log_connection_refused(self, logger: &impl Logger) -> Self {
         if let Err(e) = &self {
             logger.connection_refused(&e.to_string());
         }
@@ -45,6 +47,7 @@ impl<T, E: fmt::Display> ResultExt<T, E> for Result<T, E> {
 }
 
 pub trait MapResponse<T> {
+    #[must_use]
     fn into_response(self, f: impl Fn(T) -> Response) -> Response;
 }
 impl<T, E: Into<Response>> MapResponse<T> for Result<T, E> {
@@ -53,37 +56,42 @@ impl<T, E: Into<Response>> MapResponse<T> for Result<T, E> {
     /// The `Err` variant of the `Result` will be converted to a `Response` using it's `Into`
     /// conversion, the `Ok` variant will call `f` on the contained value.
     fn into_response(self, f: impl Fn(T) -> Response) -> Response {
-        self.map(f).unwrap_or_else(|e| e.into())
+        self.map_or_else(Into::into, f)
     }
 }
 
 /// A trait to be implemented by loggers to log server events.
 pub trait Logger: fmt::Debug {
-    /// Log general information about the server such as listening on a port.
+    /// Logs general information about the server such as listening on a port.
     fn info(&self, msg: &str);
-    /// Log that a connection was closed outside of normal circumstance, such as for an invalid key.
+    /// Logs that a connection was closed outside of normal circumstance, such as for an invalid key.
     fn connection_refused(&self, msg: &str);
+    /// Logs an internal (server) error.
+    fn server_error(&self, msg: &str);
 }
 
+/// A dummy logger for `server::Server` which does nothing and drops all logs.
 #[derive(Debug, Copy, Clone)]
 pub struct DummyLogger;
 impl DummyLogger {
     /// Make a new `DummyLogger`.
     #[allow(dead_code)]
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {}
     }
 }
 impl Logger for DummyLogger {
     fn info(&self, _: &str) {}
     fn connection_refused(&self, _: &str) {}
+    fn server_error(&self, _: &str) {}
 }
 
-pub use private::{Key, Nonce, NonceValidityWitness};
+pub use private::{Key, Nonce};
 
-// This module exists to restrict the ability to create `Key` and `Nonce` types. It contains only
-// functions & methods that need to be able to create those types, everything else is placed outside
-// it.
+/// This module exists to restrict the ability to create `Key` and `Nonce` types. It contains only
+/// functions & methods that need to be able to create those types, everything else is placed
+/// outside it.
 mod private {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -92,32 +100,33 @@ mod private {
     /// A key for a server. A key is an arbitrary string.
     ///
     /// Keys cannot be constructed directly and must be made using an associated function.
+    #[non_exhaustive]
     #[derive(Clone, PartialEq, Eq)]
-    pub struct Key(pub String, ());
+    pub struct Key(pub String);
 
     impl Key {
         /// Creates a new `Key` from a string.
         ///
         /// If the string is empty, an error will be returned.
-        #[must_use]
         pub fn new(s: impl Into<String>) -> Result<Self, EmptyKeyError> {
             let s = s.into();
 
             if s.is_empty() {
                 Err(EmptyKeyError)
             } else {
-                Ok(Key(s, ()))
+                Ok(Self(s))
             }
         }
     }
 
     /// A server's nonce.
+    ///
+    /// This can only be constructed
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub struct Nonce {
         inner: u128,
         /// The time into the future that an allowable nonce can be.
         pub leeway: Duration,
-        _private: (),
     }
 
     impl Nonce {
@@ -130,7 +139,6 @@ mod private {
                     .expect("current time is before unix epoch")
                     .as_millis(),
                 leeway,
-                _private: (),
             }
         }
 
@@ -151,7 +159,6 @@ mod private {
         /// // Check something else here and make sure you really want to update the nonce.
         /// witness.finalize_update()
         /// ```
-        #[must_use]
         pub fn begin_update(
             &mut self,
             new_nonce: u128,
@@ -161,7 +168,7 @@ mod private {
             } else if new_nonce > (Duration::since_unix_epoch() + self.leeway).as_millis() {
                 Err(NonceError::FromFuture)
             } else {
-                Ok(NonceValidityWitness(self, new_nonce, ()))
+                Ok(NonceValidityWitness(self, new_nonce))
             }
         }
     }
@@ -172,8 +179,9 @@ mod private {
     /// `NonceValidityWitness` that can be used to finishing updating the value of the `Nonce` with
     /// it's `finalize_update` method. See `Nonce::begin_update` for more documentation.
     #[must_use = "Call `finalize_update` method to update nonce, see `Nonce::begin_update` for info."]
+    #[non_exhaustive]
     #[derive(Debug)]
-    pub struct NonceValidityWitness<'a>(&'a mut Nonce, u128, ());
+    pub struct NonceValidityWitness<'a>(&'a mut Nonce, u128);
     impl NonceValidityWitness<'_> {
         /// Finishes updating the `Nonce`.
         ///
@@ -198,7 +206,6 @@ mod private {
             let mut nonce = Nonce {
                 inner: now,
                 leeway: Duration::from_secs(2),
-                _private: (),
             };
 
             assert_eq!(
@@ -220,8 +227,7 @@ impl Key {
     ///
     /// This function will panic if the environment variable can't be found. If the string is
     /// empty, an error will be returned.
-    #[must_use]
-    pub fn from_env(env_var_name: &str) -> Result<Key, EmptyKeyError> {
+    pub fn from_env(env_var_name: &str) -> Result<Self, EmptyKeyError> {
         dotenvy::var(env_var_name)
             .expect("no key found in .env file")
             .try_into()
@@ -257,7 +263,7 @@ impl TryFrom<String> for Key {
     ///
     /// If the string is empty, an error will be returned.
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        Key::new(s)
+        Self::new(s)
     }
 }
 
@@ -303,6 +309,9 @@ impl fmt::Display for NonceError {
     }
 }
 
+/// The server.
+///
+/// Call `Server::run` to run it.
 #[derive(Debug)]
 pub struct Server<L: Logger> {
     /// The socket address to listen on.
@@ -367,24 +376,29 @@ impl<L: Logger> Server<L> {
         self.logger.info(&format!("Listening on {}", self.addr));
 
         for stream in listener.incoming() {
-            let Ok(mut stream) = stream.log(&self.logger) else {
+            let Ok(mut stream) = stream.log_connection_refused(&self.logger) else {
                 continue;
             };
-            if let Err(_) = stream
+            if stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
-                .and_then(|_| stream.set_write_timeout(Some(Duration::from_secs(2))))
-                .log(&self.logger)
+                .and_then(|()| stream.set_write_timeout(Some(Duration::from_secs(2))))
+                .log_connection_refused(&self.logger)
+                .is_err()
             {
-                let _ = stream.shutdown(Shutdown::Both).log(&self.logger);
+                let _ = stream
+                    .shutdown(Shutdown::Both)
+                    .log_connection_refused(&self.logger);
                 continue;
             };
 
             self.validate_connection(&mut stream, &mut buf, &mut nonce)
-                .log(&self.logger)
+                .log_connection_refused(&self.logger)
                 .ok()
                 .flatten()
                 .map(|r| f(r).write_to(&mut stream));
-            let _ = stream.shutdown(Shutdown::Both).log(&self.logger);
+            let _ = stream
+                .shutdown(Shutdown::Both)
+                .log_connection_refused(&self.logger);
         }
 
         panic!();
@@ -395,16 +409,15 @@ impl<L: Logger> Server<L> {
     fn validate_connection(
         &self,
         stream: &mut TcpStream,
-        mut buf: &mut [u8],
+        buf: &mut [u8],
         last_nonce: &mut Nonce,
     ) -> io::Result<Option<Request>> {
-        let length = stream.read(&mut buf)?;
+        let length = stream.read(buf)?;
         let buf = &buf[..length];
 
-        Ok(match Request::new(&buf, &self.key, last_nonce) {
+        Ok(match Request::new(buf, &self.key, last_nonce) {
             Err(e) => {
-                self.logger
-                    .connection_refused(&format!("Connection rejected for reason: {e}"));
+                self.logger.connection_refused(&e.to_string());
                 Response::from(&e).write_to(stream)?;
                 stream.shutdown(Shutdown::Both)?;
                 None
@@ -450,8 +463,8 @@ impl TryFrom<&str> for Method {
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(match self {
-            Method::Get => "GET",
-            Method::Post => "POST",
+            Self::Get => "GET",
+            Self::Post => "POST",
         })
     }
 }
@@ -474,7 +487,6 @@ impl Request {
     ///
     /// The key and last nonce are required to validate the request. As all requests must be
     /// validated, any `Request` instance that exists is inherently a valid request.
-    #[must_use]
     fn new(buf: &[u8], key: &Key, last_nonce: &mut Nonce) -> Result<Self, RequestError> {
         use RequestError::*;
 
@@ -487,14 +499,11 @@ impl Request {
         let path = line1.next().ok_or(MalformedHttp)?;
 
         if path == "/favicon.ico" {
-            return Err(IllegalEndpoint("/favicon.ico".to_owned()));
+            return Err(IllegalEndpoint(Cow::Borrowed("/favicon.ico")));
         }
 
-        let lines: Vec<_> = lines
-            .map(|i| i.split_once(": "))
-            .flatten()
-            .filter(|(k, _)| matches!(*k, "Secret" | "Nonce"))
-            .collect();
+        // Get the headers
+        let lines: Vec<_> = lines.flat_map(|i| i.split_once(": ")).collect();
         let secret = lines
             .iter()
             .find(|(k, _)| *k == "Secret")
@@ -533,7 +542,7 @@ pub enum RequestError {
     /// Occurs when the secret header is missing.
     MissingSecret,
     /// Occurs when a request is made to an illegal endpoint.
-    IllegalEndpoint(String),
+    IllegalEndpoint(Cow<'static, str>),
     /// Occurs when the key is invalid (because the secret doesn't match).
     InvalidKey,
     /// Occurs when the nonce is invalid.
@@ -574,7 +583,7 @@ impl From<&RequestError> for Response {
             RequestError::InvalidKey => 401,
             _ => 400,
         };
-        Response::from_message(status, value.to_string())
+        Self::from_message(status, value.to_string())
     }
 }
 
@@ -600,7 +609,7 @@ impl ResponseContent {
         match self {
             None => &[],
             Text(s) => s.as_bytes(),
-            Png(b) => &b,
+            Png(b) => b,
         }
     }
 
@@ -684,8 +693,8 @@ impl Response {
 
     /// Writes the http of this response to a `TcpStream`.
     fn write_to(&self, stream: &mut TcpStream) -> std::io::Result<()> {
-        stream.write_all(&self.generate_headers().as_bytes())?;
-        stream.write_all(&self.content.as_bytes())
+        stream.write_all(self.generate_headers().as_bytes())?;
+        stream.write_all(self.content.as_bytes())
     }
 }
 
@@ -744,7 +753,8 @@ mod tests {
                 stream.write_all(http.as_bytes()).unwrap();
                 // The server writes the headers and content with two separate `write` calls, and if
                 // we read immediately without waiting first, we'll only get the first `write` call.
-                thread::sleep(Duration::from_millis(1));
+                // TODO: should probably make this less of a horrible hack
+                thread::sleep(Duration::from_millis(100));
                 let len = stream.read(&mut self.buf).unwrap();
                 String::from_utf8_lossy(&self.buf[0..len]).to_string()
             }
@@ -771,7 +781,7 @@ mod tests {
                     } if path == "/test2" => {
                         Response::from_message(400, "this is a message".to_owned())
                     }
-                    Request { method, path } => panic!("received {} request to {}", method, path),
+                    Request { method, path } => panic!("received {method} request to {path}"),
                 })
                 .unwrap();
         });
@@ -804,7 +814,7 @@ mod tests {
         if let Err(e) = server_res.join() {
             match e.downcast::<String>() {
                 Ok(s) if *s == "received GET request to /stop" => (),
-                i => panic!("{:?}", i),
+                i => panic!("{i:?}"),
             }
         }
     }
