@@ -1,5 +1,9 @@
 # To use this, you must have a `.env` file that contains a `KEY` environment variable.
 
+# TODO:
+#  - finish install flag stuff
+#  - finish uninstall flag stuff
+
 import os
 from contextlib import suppress, redirect_stdout
 from dataclasses import dataclass
@@ -10,36 +14,60 @@ from subprocess import Popen, call, PIPE
 from sys import argv, exit
 import tomllib
 
+import pylnk3
+
 
 @dataclass
 class DeployFile:
-    """A file that has a source (copy from) and a destination (copy to)."""
+    """A file to deploy to an install location."""
 
     def __init__(self, src: Path, dest: Path):
         self.src = Path(src)
         self.dest = Path(dest)
 
-    def deploy(self):
+    def __repr__(self):
+        return f'{type(self).__name__}(src={self.src}, dest={self.dest})'
+
+    def remove_dest(self):
+        """Try to remove the destination file, doing nothing if it doesn't exist."""
         with suppress(FileNotFoundError):
             self.dest.unlink()
+
+    def deploy(self):
+        """Deploy this file to it's install location."""
+        self.remove_dest()
         copy(self.src, self.dest)
 
 
-# TODO:
-# - make this deploy script work when called from any location
-cur_location = Path(__file__).parent.absolute()
+class LnkDeployFile(DeployFile):
+    def deploy(self):
+        """Create the lnk file at the install location (`self.dest`), targeting the src location.
+
+        Importantly, the source file for this should be an installed file, not a file that only
+        exists in development.
+        """
+        self.remove_dest()
+        # pylnk3 doesn't like `pathlib.Path`s so we `.__fspath__()` them. It might also assume (&
+        # require) windows-style backslash-separated paths? I didn't look to hard at the code but it
+        # kinda seems like it doesn't normalize them itself?
+        pylnk3.for_file(self.src.__fspath__(), self.dest.__fspath__(),
+                        work_dir=self.src.parent.__fspath__())
+
+
+project_dir = Path(__file__).parent.absolute()
 # We get the exe name from the Cargo.toml
-name = tomllib.loads(Path('Cargo.toml').read_text())['package']['name']
-dest = Path('~/AppData/Local', name).expanduser()
+project_name = tomllib.loads(
+    (project_dir/'Cargo.toml').read_text())['package']['name']
+exe_name = f'{project_name}.exe'
+install_dir = Path('~/AppData/Local', project_name).expanduser()
 startup_dir = Path(
     '~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup').expanduser()
 
-symlink_path = startup_dir/name
-exe_name = f'{name}.exe'
-exe_file = DeployFile(
-    Path(cur_location, 'target/release', exe_name), dest/exe_name)
-dot_env_file = DeployFile(cur_location/'.env', dest/'.env')
-files_to_deploy = [exe_file, dot_env_file]
+exe_file = DeployFile(project_dir/'target/release' /
+                      exe_name, install_dir/exe_name)
+dot_env_file = DeployFile(project_dir/'.env', install_dir/'.env')
+lnk_file = LnkDeployFile(exe_file.dest, startup_dir/f'{project_name}.lnk')
+files_to_deploy = [exe_file, dot_env_file, lnk_file]
 
 
 class ProcessKillError(Exception):
@@ -55,11 +83,13 @@ def print_usage():
                      '\n\nusage: py deploy_win.py [options]',
                      '\noptions:',
                      '    -h, --help    Show this help information.',
-                    f'    -k, --kill    Kill the {name} process currently running (if there is one) then exit.')))
+                    f'    -k, --kill    Kill the {project_name} process currently running (if there is one) then exit.'
+                     '    --install-only    Only install the files, without starting the server'
+                     '    --uninstall    Uninstall the program.')))
 
 
-def exit_with_err(msg: str, end='\n'):
-    print(f'Error: {msg}', end)
+def exit_with_err(msg: str):
+    print(f'Error: {msg}')
     exit()
 
 
@@ -74,8 +104,7 @@ def kill_process(name: str):
 
 
 def build():
-    call(['cargo', 'build', '--release', '--features', 'no_term', '--manifest-path',
-          str(cur_location/'Cargo.toml')])
+    call(['cargo', 'build', '--release', '--features', 'no_term'])
 
 
 def handle_invalid_config():
@@ -84,26 +113,32 @@ def handle_invalid_config():
             'no environment variable set or presence in `.env` for `REMOTE_CONTROL_KEY`')
 
 
-def main():
-    handle_invalid_config()
+def handle_early_exit_args():
     args = argv[1:]
-    success_msg = f'Process {exe_name} started'
-
     if '-h' in args or '--help' in args:
         print_usage()
-        return
+        exit()
     if '-k' in args or '--kill' in args:
         try:
             kill_process(exe_name)
             print('Killed process')
         except ProcessNotRunningError:
             print('Process wasn\'t running')
-        return
+        exit()
+
+
+def main():
+    handle_invalid_config()
+    handle_early_exit_args()
+    # We set the working directory so that cargo works properly when the deploy script is called
+    # from somewhere other than the project folder.
+    os.chdir(project_dir)
 
     with suppress(FileExistsError):
-        dest.mkdir()
+        install_dir.mkdir()
     build()
 
+    success_msg = f'Process {exe_name} started'
     with suppress(ProcessKillError):
         kill_process(exe_name)
         success_msg += ' & old process was killed'
@@ -111,9 +146,6 @@ def main():
     for deploy_file in files_to_deploy:
         deploy_file.deploy()
 
-    with suppress(FileNotFoundError):
-        symlink_path.unlink()
-    symlink_path.symlink_to(exe_file.dest)
     os.startfile(exe_file.dest)
 
     print(success_msg)
