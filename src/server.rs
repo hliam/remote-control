@@ -176,9 +176,9 @@ mod private {
     /// A witness to update a nonce with.
     ///
     /// Upon trying to update a nonce with `Nonce::begin_update`, you'll get a
-    /// `NonceValidityWitness` that can be used to finishing updating the value of the `Nonce` with
-    /// it's `finalize_update` method. See `Nonce::begin_update` for more documentation.
-    #[must_use = "Call `finalize_update` method to update nonce, see `Nonce::begin_update` for info."]
+    /// `NonceValidityWitness` that can be used to actually update the value of the `Nonce` with
+    /// it's `commit_update` method. See `Nonce::begin_update` for more documentation.
+    #[must_use = "Call `commit_update` method to update nonce, see `Nonce::begin_update` for info."]
     #[non_exhaustive]
     #[derive(Debug)]
     pub struct NonceValidityWitness<'a>(&'a mut Nonce, u128);
@@ -186,7 +186,7 @@ mod private {
         /// Finishes updating the `Nonce`.
         ///
         /// See `Nonce::begin_update` for more documentation.
-        pub fn finalize_update(self) {
+        pub fn commit_update(self) {
             self.0.inner = self.1;
         }
     }
@@ -216,7 +216,7 @@ mod private {
                 nonce.begin_update(now + 5000).unwrap_err(),
                 NonceError::FromFuture
             );
-            nonce.begin_update(now + 1).unwrap().finalize_update();
+            nonce.begin_update(now + 1).unwrap().commit_update();
             assert_eq!(nonce.inner, now + 1);
         }
     }
@@ -519,7 +519,7 @@ impl Request {
 
         let nonce_witness = last_nonce.begin_update(nonce)?;
         if key.generate_secret(nonce) == secret {
-            nonce_witness.finalize_update();
+            nonce_witness.commit_update();
             Ok(Self {
                 method,
                 path: path.to_owned(),
