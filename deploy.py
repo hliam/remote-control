@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
+from random import SystemRandom
 from shutil import copy
 from subprocess import Popen, call, PIPE
 from sys import argv, exit
@@ -64,7 +65,7 @@ dot_env_file = DeployFile(project_dir/'.env', install_dir/'.env')
 lnk_file = LnkDeployFile(exe_file.dest, startup_dir/f'{project_name}.lnk')
 files_to_deploy = [exe_file, dot_env_file, lnk_file]
 
-allowed_args = ['-h', '--help', '-k', '--kill', '--install-location', '--install-only',
+allowed_args = ['-h', '--help', '-k', '--kill', '--generate-key', '--install-location', '--install-only',
                 '--uninstall']
 
 
@@ -77,13 +78,14 @@ def print_usage():
     print('\n'.join(('This script will start the program and add it to the startup directory',
                      '\n\nusage: py deploy_win.py [options]',
                      '\noptions:',
-                     '    -h, --help            Show this help information.',
+                     '    -h, --help            Show this help information',
                      (f'    -k, --kill            Kill the {project_name} process currently running (if there is one) '
-                      'then exit.'),
-                     '    --install-location    Print the installation location (not including the startup folder).',
+                      'then exit'),
+                     '    --generate-key        Generate a key',
+                     '    --install-location    Print the installation location (not including the startup folder)',
                      ('    --install-only        Only install the files and set to run at startup, but don\'t start '
-                      'the server.'),
-                     '    --uninstall           Uninstall the program.')))
+                      'the server'),
+                     '    --uninstall           Uninstall the program')))
 
 
 def exit_with_err(msg: str):
@@ -107,6 +109,24 @@ def kill_process(name: str) -> bool:
             raise ProcessKillError(err_msg)
 
     return True
+
+
+
+def generate_key() -> str:
+    """Generate a (32 ascii character) key.
+
+    The key is composed of printable ascii characters and will never start or end with a space. The
+    requirements of the specifics of the composition of the key come from the Shortcuts client.
+    """
+    # 32 byte and printable ascii is required because of the Shortcuts client. Not beginning or
+    # ending with spaces is a usability consideration.
+    rand = SystemRandom()
+    while True:
+        out = "".join(chr(rand.randrange(32, 127)) for _ in range(32))
+        # keys can't begin or end with a space
+        if not (out.startswith(" ") or out.endswith(" ")):
+            return out
+
 
 
 def build():
@@ -139,6 +159,12 @@ def handle_early_exit_args(args: list[str]):
             print('Killed process')
         else:
             print('Process wasn\'t running')
+        exit()
+    if '--generate-key' in args:
+        line = '-' * 32
+        print((f'\n{line}\n\n\x1b[34m{generate_key()}\x1b[0m\n\n{line}\n'
+                '^^^^^^  This is your key  ^^^^^^\n'
+                '      (between the lines)\n'))
         exit()
     if '--install-location' in args:
         print(install_dir)
