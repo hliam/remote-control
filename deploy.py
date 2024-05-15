@@ -59,8 +59,8 @@ install_dir = Path('~/AppData/Local', project_name).expanduser()
 startup_dir = Path(
     '~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup').expanduser()
 
-exe_file = DeployFile(project_dir/'target/release' /
-                      exe_name, install_dir/exe_name)
+target_dir = Path(os.environ.get('CARGO_TARGET_DIR', './target'))
+exe_file = DeployFile(target_dir/'release'/exe_name, install_dir/exe_name)
 dot_env_file = DeployFile(project_dir/'.env', install_dir/'.env')
 lnk_file = LnkDeployFile(exe_file.dest, startup_dir/f'{project_name}.lnk')
 files_to_deploy = [exe_file, dot_env_file, lnk_file]
