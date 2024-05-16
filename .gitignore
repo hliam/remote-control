@@ -1,5 +1,4 @@
 /target
 **/*.rs.bk
 .vscode
-.env
-Rocket.toml
+config.toml

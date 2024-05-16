@@ -18,9 +18,10 @@ import pylnk3
 class DeployFile:
     """A file to deploy to an install location."""
 
-    def __init__(self, src: Path, dest: Path):
+    def __init__(self, src: Path, dest: Path, missing_ok: bool = False):
         self.src = Path(src)
         self.dest = Path(dest)
+        self.missing_ok = missing_ok
 
     def __repr__(self):
         return f'{type(self).__name__}(src={self.src}, dest={self.dest})'
@@ -32,7 +33,11 @@ class DeployFile:
     def deploy(self):
         """Deploy this file to it's install location."""
         self.remove_dest()
-        copy(self.src, self.dest)
+        try:
+            copy(self.src, self.dest)
+        except FileNotFoundError:
+            if not self.missing_ok:
+                raise
 
 
 class LnkDeployFile(DeployFile):
@@ -61,9 +66,9 @@ startup_dir = Path(
 
 target_dir = Path(os.environ.get('CARGO_TARGET_DIR', './target'))
 exe_file = DeployFile(target_dir/'release'/exe_name, install_dir/exe_name)
-dot_env_file = DeployFile(project_dir/'.env', install_dir/'.env')
+config_file = DeployFile(project_dir/'config.toml', install_dir/'config.toml', True)
 lnk_file = LnkDeployFile(exe_file.dest, startup_dir/f'{project_name}.lnk')
-files_to_deploy = [exe_file, dot_env_file, lnk_file]
+files_to_deploy = [exe_file, config_file, lnk_file]
 
 allowed_args = ['-h', '--help', '-k', '--kill', '--generate-key', '--install-location', '--install-only',
                 '--uninstall']
@@ -111,7 +116,6 @@ def kill_process(name: str) -> bool:
     return True
 
 
-
 def generate_key() -> str:
     """Generate a (32 ascii character) key.
 
@@ -128,17 +132,15 @@ def generate_key() -> str:
             return out
 
 
-
 def build():
     """Build the server."""
     call(['cargo', 'build', '--release', '--features', 'no_term'])
 
 
-def handle_invalid_config():
-    """Warn & exit if the server config is invalid.."""
-    if os.getenv('REMOTE_CONTROL_KEY') is None and 'REMOTE_CONTROL_KEY' not in dot_env_file.src.read_text():
-        exit_with_err(
-            'no environment variable set or presence in `.env` for `REMOTE_CONTROL_KEY`')
+def warn_on_missing_config_file():
+    """Print a warning if the config.toml file is missing."""
+    if not config_file.src.exists():
+        print('[\x1b[91mwarning\x1b[0m] no config.toml file found')
 
 
 def handle_invalid_args(args: list[str]):
@@ -184,7 +186,7 @@ def handle_early_exit_args(args: list[str]):
 
 def main():
     args = argv[1:]
-    handle_invalid_config()
+    warn_on_missing_config_file()
     handle_invalid_args(args)
     handle_early_exit_args(args)
     # We set the working directory so that cargo works properly when the deploy script is called
