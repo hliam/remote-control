@@ -3,6 +3,7 @@ mod server;
 mod util;
 
 use std::error;
+use std::fmt::Display;
 use std::io;
 
 #[cfg(not(debug_assertions))]
@@ -65,7 +66,7 @@ impl DebugLogger {
     /// Prints a log entry.
     ///
     /// For example: `[11:30:15 connection refused] key is invalid`
-    fn print(title: &str, msg: &str, color: Color) {
+    fn print(title: &str, msg: &impl Display, color: Color) {
         println!(
             "[{}{} {title}\x1b[0m] {msg}",
             color.ansii_code(),
@@ -75,13 +76,13 @@ impl DebugLogger {
 }
 
 impl server::Logger for DebugLogger {
-    fn info(&self, msg: &str) {
+    fn info(&self, msg: &impl Display) {
         Self::print("info", msg, Color::Blue);
     }
-    fn connection_refused(&self, msg: &str) {
+    fn connection_refused(&self, msg: &impl Display) {
         Self::print("connection refused", msg, Color::Red);
     }
-    fn server_error(&self, msg: &str) {
+    fn server_error(&self, msg: &impl Display) {
         Self::print("server error", msg, Color::BrightRed);
     }
 }

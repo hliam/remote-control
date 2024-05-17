@@ -47,7 +47,7 @@ impl<T, E: fmt::Display> ResultExt<T, E> for Result<T, E> {
 
     fn log_connection_refused(self, logger: &impl Logger) -> Self {
         if let Err(e) = &self {
-            logger.connection_refused(&e.to_string());
+            logger.connection_refused(e);
         }
         self
     }
@@ -71,11 +71,11 @@ impl<T, E: Into<Response>> MapResponse<T> for Result<T, E> {
 /// A trait to be implemented by loggers to log server events.
 pub trait Logger: fmt::Debug {
     /// Logs general information about the server such as listening on a port.
-    fn info(&self, msg: &str);
+    fn info(&self, msg: &impl fmt::Display);
     /// Logs that a connection was closed outside of normal circumstance, such as for an invalid key.
-    fn connection_refused(&self, msg: &str);
+    fn connection_refused(&self, msg: &impl fmt::Display);
     /// Logs an internal (server) error.
-    fn server_error(&self, msg: &str);
+    fn server_error(&self, msg: &impl fmt::Display);
 }
 
 /// A dummy logger for `server::Server` which does nothing and drops all logs.
@@ -90,9 +90,9 @@ impl DummyLogger {
     }
 }
 impl Logger for DummyLogger {
-    fn info(&self, _: &str) {}
-    fn connection_refused(&self, _: &str) {}
-    fn server_error(&self, _: &str) {}
+    fn info(&self, _: &impl fmt::Display) {}
+    fn connection_refused(&self, _: &impl fmt::Display) {}
+    fn server_error(&self, _: &impl fmt::Display) {}
 }
 
 pub use private::{Key, Nonce};
@@ -483,7 +483,7 @@ impl<L: Logger> Server<L> {
 
         Ok(match Request::new(buf, &self.key, last_nonce) {
             Err(e) => {
-                self.logger.connection_refused(&e.to_string());
+                self.logger.connection_refused(&e);
                 Response::from(&e).write_to(stream)?;
                 stream.shutdown(Shutdown::Both)?;
                 None
@@ -1002,18 +1002,17 @@ pub enum RequestError {
 impl Error for RequestError {}
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Cow::{Borrowed, Owned};
         use RequestError::*;
 
-        f.write_str(&match self {
-            MalformedHttp => Borrowed("http is malformed"),
-            MalformedHeaders => Borrowed("a header is malformed"),
-            MissingNonce => Borrowed("nonce header not found"),
-            MissingSecret => Borrowed("secret header not found"),
-            IllegalEndpoint(i) => Owned(format!("tried to reach illegal endpoint {i}")),
-            InvalidKey => Borrowed("key is invalid"),
-            NonceError(e) => Owned(e.to_string()),
-        })
+        match self {
+            MalformedHttp => f.write_str("http is malformed"),
+            MalformedHeaders => f.write_str("a header is malformed"),
+            MissingNonce => f.write_str("nonce header not found"),
+            MissingSecret => f.write_str("secret header not found"),
+            IllegalEndpoint(i) => write!(f, "tried to reach illegal endpoint {i}"),
+            InvalidKey => f.write_str("key is invalid"),
+            NonceError(e) => fmt::Display::fmt(e, f),
+        }
     }
 }
 
