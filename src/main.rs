@@ -68,23 +68,38 @@ impl DebugLogger {
     /// Prints a log entry.
     ///
     /// For example: `[11:30:15 connection refused] key is invalid`
-    fn print(title: &str, msg: &str) {
+    fn print(title: &str, msg: &str, color: Color) {
         println!(
-            "[{} {title}] {msg}",
+            "[{}{} {title}\x1b[0m] {msg}",
+            color.ansii_code(),
             chrono::Local::now().format("%-H:%M:%S")
         );
     }
 }
 
-// TODO: add colored log output
 impl server::Logger for DebugLogger {
     fn info(&self, msg: &str) {
-        Self::print("info", msg);
+        Self::print("info", msg, Color::Blue);
     }
     fn connection_refused(&self, msg: &str) {
-        Self::print("connection refused", msg);
+        Self::print("connection refused", msg, Color::Red);
     }
     fn server_error(&self, msg: &str) {
-        Self::print("server error", msg);
+        Self::print("server error", msg, Color::BrightRed);
+    }
+}
+
+enum Color {
+    Blue,
+    BrightRed,
+    Red,
+}
+impl Color {
+    fn ansii_code(&self) -> &str {
+        match self {
+            Self::Blue => "\x1b[34m",
+            Self::BrightRed => "\x1b[91m",
+            Self::Red => "\x1b[31m",
+        }
     }
 }
