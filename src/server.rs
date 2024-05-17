@@ -1162,6 +1162,54 @@ impl Response {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, SocketAddrV4};
+
+    use super::*;
+
+    #[test]
+    fn test_config_building_in_code() {
+        let ip = Ipv4Addr::new(0, 0, 0, 0);
+        let port = 1337;
+        let key = Key::new("this is a key and it's 32 bytes.").unwrap();
+
+        let config = Server::builder().with_addr(ip).with_port(port).with_key(key.clone());
+        assert_eq!(config.addr, Some(ip));
+        assert_eq!(config.port, Some(port));
+        assert_eq!(config.key, Some(key.clone()));
+
+        let server = config
+            .build(DummyLogger::new())
+            .expect("failed to build config into server");
+        assert_eq!(server.addr, SocketAddrV4::new(ip, port));
+        assert_eq!(server.key, key);
+
+        // Test default values
+
+        let server = Server::builder()
+            .with_port(port)
+            .with_key(key)
+            .build(DummyLogger::new())
+            .expect("failed to build config into server");
+
+        assert_eq!(server.addr, SocketAddrV4::new(ip, port));
+    }
+
+    #[test]
+    pub fn test_config_building_from_toml() {
+        let toml = "\
+            address = \"0.0.0.0\"\n\
+            port = 1337\n\
+            key = \"this is a key and it's 32 bytes.\"";
+
+        let config = Config::new().from_toml(toml).expect("failed to parse toml");
+        assert_eq!(config.addr, Some(Ipv4Addr::new(0, 0, 0, 0)));
+        assert_eq!(config.port, Some(1337));
+        assert_eq!(
+            config.key,
+            Some(Key::new("this is a key and it's 32 bytes.").unwrap())
+        );
+    }
+
     /// Generates the http of what a response should look like from status and content.
     fn format_http_response(status: u16, content: &str) -> String {
         format!(
@@ -1178,13 +1226,8 @@ mod tests {
     #[test]
     fn test_server() {
         use std::io::{Read, Write};
-        use std::net::SocketAddrV4;
         use std::thread;
         use std::time::Duration;
-
-        use super::{
-            Config, DummyLogger, DurationExt, Key, Method, Request, RequestError, Response,
-        };
 
         struct ClientMock {
             dst_addr: SocketAddrV4,
