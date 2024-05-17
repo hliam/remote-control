@@ -1,3 +1,7 @@
+//! Underlying utilities for interacting with the operating system.
+//! 
+//! This module handles the actual actions of requests made to the server.
+
 use std::os::windows::prelude::OsStrExt;
 use std::{ffi::OsStr, fmt};
 

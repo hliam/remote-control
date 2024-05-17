@@ -1,3 +1,5 @@
+//! The server, responses, and requests.
+
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::error::Error;
@@ -166,11 +168,14 @@ mod private {
         ///
         /// # Example
         ///
-        /// ```
-        /// let nonce = Nonce::new();
+        /// ```no_run
+        /// use std::time::Duration;
+        /// use server::Nonce;
+        ///
+        /// let mut nonce = Nonce::new(Duration::from_secs(2));
         /// let witness = nonce.begin_update(1337).expect("invalid nonce");
         /// // Check something else here and make sure you really want to update the nonce.
-        /// witness.finalize_update()
+        /// witness.commit()
         /// ```
         pub fn begin_update(
             &mut self,
@@ -190,8 +195,8 @@ mod private {
     ///
     /// Upon trying to update a nonce with `Nonce::begin_update`, you'll get a
     /// `NonceValidityWitness` that can be used to actually update the value of the `Nonce` with
-    /// it's `commit_update` method. See `Nonce::begin_update` for more documentation.
-    #[must_use = "Call `commit_update` method to update nonce, see `Nonce::begin_update` for info."]
+    /// it's `commit` method. See `Nonce::begin_update` for more documentation.
+    #[must_use = "Call `commit` method to update nonce, see `Nonce::begin_update` for info."]
     #[non_exhaustive]
     #[derive(Debug)]
     pub struct NonceValidityWitness<'a>(&'a mut Nonce, u128);
@@ -358,6 +363,9 @@ impl fmt::Display for NonceError {
 /// The server.
 ///
 /// Call `Server::run` to run it.
+///
+/// The server only handles the actual networking and has no knowledge of their content beyond
+/// authorization.
 #[derive(Debug)]
 pub struct Server<L: Logger> {
     /// The socket address to listen on.
@@ -381,11 +389,13 @@ impl Server<DummyLogger> {
     /// # Example
     ///
     /// ```
-    /// let server = Server::build()
+    /// use server::{DummyLogger, Key, Server};
+    ///
+    /// let server = Server::builder()
     ///     .on_localhost()
     ///     .with_port(1337)
     ///     .with_key(Key::new("this is a key and it's 32 bytes.").unwrap())
-    ///     .build()
+    ///     .build(DummyLogger::new())
     ///     .expect("missing required config attributes");
     #[must_use]
     #[allow(dead_code)]
@@ -402,6 +412,8 @@ impl<L: Logger> Server<L> {
     /// # Example
     ///
     /// ```
+    /// use server::{DummyLogger, Server};
+    ///
     /// let server = Server::from_config_file(DummyLogger::new());
     /// ```
     ///
@@ -502,16 +514,18 @@ impl<L: Logger> Server<L> {
 ///  - `key`
 ///
 /// ### Default attributes & values
-///  - `addr`: `0.0.0.0` (lan)
+///  - `address` defaults to `0.0.0.0` (lan)
 ///
 /// # Example
 ///
 /// ```
+/// use server::{Config, DummyLogger, Key};
+///
 /// let server = Config::new()
 ///     .on_localhost()
 ///     .with_port(1337)
 ///     .with_key(Key::new("this is a key and it's 32 bytes.").unwrap())
-///     .build()
+///     .build(DummyLogger::new())
 ///     .expect("missing required config attributes");
 /// ```
 #[non_exhaustive]
@@ -555,7 +569,7 @@ impl Config {
     ///  - `key`
     ///
     /// ### Default attributes & values
-    ///  - `address`: `0.0.0.0` (lan)
+    ///  - `address` defaults to `0.0.0.0` (lan)
     ///
     /// # Example
     ///
@@ -567,14 +581,15 @@ impl Config {
     /// // key = "this is a key and it's 32 bytes."
     ///
     /// use std::net::{Ipv4Addr, SocketAddrV4};
+    /// use server::{Key, DummyLogger, Server};
     ///
     /// let server = Server::builder()
     ///     .from_config_file()
-    ///     .expect("failure reading file");
-    ///     .build()
+    ///     .expect("failure reading file")
+    ///     .build(DummyLogger::new())
     ///     .expect("file didn't contain all necessary items");
     ///
-    /// assert_eq!(server.addr, SocketAddrV4::new(Ipv4::new(127, 0, 0, 1), 1337));
+    /// assert_eq!(server.addr, SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1337));
     /// assert_eq!(server.key, Key::new("this is a key and it's 32 bytes.").unwrap());
     /// ```
     #[allow(dead_code, clippy::wrong_self_convention)]
@@ -598,7 +613,7 @@ impl Config {
     ///  - `key`
     ///
     /// ### Default attributes & values
-    ///  - `address`: `0.0.0.0` (lan)
+    ///  - `address` defaults to `0.0.0.0` (lan)
     ///
     /// # Example
     ///
@@ -610,14 +625,15 @@ impl Config {
     /// // key = "this is a key and it's 32 bytes."
     ///
     /// use std::net::{Ipv4Addr, SocketAddrV4};
+    /// use server::{DummyLogger, Key, Server};
     ///
     /// let server = Server::builder()
     ///     .from_specific_file("a/b/c/my_config_file.toml")
-    ///     .expect("failure reading file");
-    ///     .build()
+    ///     .expect("failure reading file")
+    ///     .build(DummyLogger::new())
     ///     .expect("file didn't contain all necessary items");
     ///
-    /// assert_eq!(server.addr, SocketAddrV4::new(Ipv4::new(127, 0, 0, 1), 1337));
+    /// assert_eq!(server.addr, SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1337));
     /// assert_eq!(server.key, Key::new("this is a key and it's 32 bytes.").unwrap());
     /// ```
     #[allow(clippy::wrong_self_convention)]
@@ -641,11 +657,12 @@ impl Config {
     ///
     /// ```
     /// use std::net::{Ipv4Addr, SocketAddrV4};
+    /// use server::Server;
     ///
     /// let ip = Ipv4Addr::new(127, 0, 0, 1);
     /// let config = Server::builder().with_addr(ip).with_port(1337);
     ///
-    /// assert_eq!(config.sock_addr(), SocketAddrV4::new(ip, 1337));
+    /// assert_eq!(config.sock_addr(), Some(SocketAddrV4::new(ip, 1337)));
     /// ```
     #[must_use]
     #[allow(dead_code)]
@@ -665,16 +682,18 @@ impl Config {
     ///  - `key`
     ///
     /// ### Default attributes & values
-    ///  - `addr`: `0.0.0.0`
+    ///  - `address` defaults to `0.0.0.0`
     ///
     /// # Example
     ///
     /// ```
-    /// let server = Server::build()
+    /// use server::{DummyLogger, Key, Server};
+    ///
+    /// let server = Server::builder()
     ///     .on_localhost()
     ///     .with_port(1337)
     ///     .with_key(Key::new("this is a key and it's 32 bytes.").unwrap())
-    ///     .build()
+    ///     .build(DummyLogger::new())
     ///     .expect("missing required config attributes");
     /// ```
     pub fn build<L: Logger>(self, logger: L) -> Result<Server<L>, ConfigError> {
@@ -689,54 +708,22 @@ impl Config {
         })
     }
 
-    /// Sets the key of this `Config`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// let key = Key::new("this is a key and it's 32 bytes.").unwrap();
-    /// let config = Server::builder().with_key(key);
-    ///
-    /// assert_eq!(key, config.key);
-    /// ```
-    #[allow(dead_code)]
-    pub fn with_key(mut self, key: Key) -> Self {
-        self.key = Some(key);
-        self
-    }
     /// Sets the ip address of this `Config`.
     ///
     /// # Example
     ///
     /// ```
     /// use std::net::Ipv4Addr;
+    /// use server::Server;
     ///
-    /// let ip = Ipv4Addr::new(127, 0, 0, 1);
-    /// let config = Server::builder().with_addr(ip);
+    /// let addr = Ipv4Addr::new(127, 0, 0, 1);
+    /// let config = Server::builder().with_addr(addr);
     ///
-    /// assert_eq!(ip, config.ip);
+    /// assert_eq!(config.addr, Some(addr));
     /// ```
     #[allow(dead_code)]
     pub fn with_addr(mut self, addr: Ipv4Addr) -> Self {
         self.addr = Some(addr);
-        self
-    }
-    /// Sets the socket address of this `Config`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use std::net::{Ipv4Addr, SocketAddrV4};
-    ///
-    /// let sock_addr = Ipv4Addr::new(127, 0, 0, 1);
-    /// let config = Server::builder().with_sock_addr(sock_addr);
-    ///
-    /// assert_eq!(sock_addr, config.sock_addr());
-    /// ```
-    #[allow(dead_code)]
-    pub fn with_sock_addr(mut self, sock_addr: SocketAddrV4) -> Self {
-        self.addr = Some(*sock_addr.ip());
-        self.port = Some(sock_addr.port());
         self
     }
     /// Sets the ip address of this `Config` to localhost (`127.0.0.1`).
@@ -745,10 +732,11 @@ impl Config {
     ///
     /// ```
     /// use std::net::Ipv4Addr;
+    /// use server::Server;
     ///
-    /// let config = Server::builder().on_localhost(ip);
+    /// let config = Server::builder().on_localhost();
     ///
-    /// assert_eq!(config.ip, Ipv4Addr::new(127, 0, 0, 1));
+    /// assert_eq!(config.addr, Some(Ipv4Addr::new(127, 0, 0, 1)));
     /// ```
     #[allow(dead_code)]
     pub fn on_localhost(self) -> Self {
@@ -762,10 +750,12 @@ impl Config {
     ///
     /// ```
     /// use std::net::Ipv4Addr;
+    /// use server::Server;
     ///
-    /// let config = Server::builder().on_lan(ip);
     ///
-    /// assert_eq!(config.ip, Ipv4Addr::new(0, 0, 0, 0));
+    /// let config = Server::builder().on_lan();
+    ///
+    /// assert_eq!(config.addr, Some(Ipv4Addr::new(0, 0, 0, 0)));
     /// ```
     #[allow(dead_code)]
     pub fn on_lan(self) -> Self {
@@ -776,13 +766,51 @@ impl Config {
     /// # Example
     ///
     /// ```
+    /// use server::Server;
+    ///
     /// let config = Server::builder().with_port(1337);
     ///
-    /// assert_eq!(config.port, 1337);
+    /// assert_eq!(config.port, Some(1337));
     /// ```
     #[allow(dead_code)]
     pub fn with_port(mut self, port: u16) -> Self {
         self.port = Some(port);
+        self
+    }
+    /// Sets the socket address of this `Config`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::net::{Ipv4Addr, SocketAddrV4};
+    /// use server::Server;
+    ///
+    /// let sock_addr = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 1337);
+    /// let config = Server::builder().with_sock_addr(sock_addr);
+    ///
+    /// assert_eq!(config.sock_addr(), Some(sock_addr));
+    /// ```
+    #[allow(dead_code)]
+    pub fn with_sock_addr(mut self, sock_addr: SocketAddrV4) -> Self {
+        self.addr = Some(*sock_addr.ip());
+        self.port = Some(sock_addr.port());
+        self
+    }
+    /// Sets the key of this `Config`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use server::{Key, Server};
+    ///
+    /// let key = Key::new("this is a key and it's 32 bytes.").unwrap();
+    /// let config = Server::builder().with_key(key.clone());
+    ///
+    /// assert_eq!(config.key, Some(key));
+    /// ```
+    #[allow(dead_code)]
+    pub fn with_key(mut self, key: Key) -> Self {
+        self.key = Some(key);
         self
     }
 }

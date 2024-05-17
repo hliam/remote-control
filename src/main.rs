@@ -1,4 +1,3 @@
-//! TODO: delete this doc
 #![cfg_attr(feature = "no_term", windows_subsystem = "windows")]
 mod server;
 mod util;
@@ -9,8 +8,6 @@ use std::io;
 #[cfg(not(debug_assertions))]
 use server::DummyLogger;
 use server::{Logger, MapResponse, Response, ResultExt, Server};
-
-// TODO: document modules
 
 fn main() {
     let err = run().unwrap_err();
