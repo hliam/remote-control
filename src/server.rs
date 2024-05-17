@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -641,8 +641,16 @@ impl Config {
         mut self,
         config_file: impl AsRef<Path>,
     ) -> Result<Self, ConfigError> {
-        let new: Self =
-            toml::from_str(&std::fs::read_to_string(config_file)?).map_err(ConfigError::from)?;
+        let config_file = config_file.as_ref();
+
+        let file_content = match std::fs::read_to_string(config_file) {
+            Ok(i) => i,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(ConfigError::FileNotFound(config_file.to_owned()))
+            }
+            Err(e) => return Err(ConfigError::Io(e)),
+        };
+        let new: Self = toml::from_str(&file_content)?;
 
         self.addr = new.addr.or(self.addr);
         self.port = new.port.or(self.port);
@@ -829,6 +837,8 @@ pub enum ConfigError {
     MissingRequired(&'static str),
     /// Returned when opening and reading a config file encounters an error.
     Io(io::Error),
+    /// Returned when the config file is not found.
+    FileNotFound(PathBuf),
     /// Returned when a toml error is encountered when paring a config file.
     ///
     /// Invalid addresses, ports, keys, etc... in a config file are considered toml errors and
@@ -841,6 +851,7 @@ impl Error for ConfigError {
         match self {
             Self::MissingRequired(_) => None,
             Self::Io(e) => Some(e),
+            Self::FileNotFound(_) => None,
             Self::Toml(e) => Some(e),
         }
     }
@@ -848,11 +859,8 @@ impl Error for ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            // TODO: store expected file path with NotFound and include it in error info
             Self::MissingRequired(field) => write!(f, "no {field} set"),
-            Self::Io(err) if err.kind() == io::ErrorKind::NotFound => {
-                f.write_str("config file not found (the default name is 'config.toml')")
-            }
+            Self::FileNotFound(path) => write!(f, "no config file found at {}", path.display()),
             _ => fmt::Display::fmt(&self.source().unwrap(), f),
         }
     }
@@ -860,6 +868,13 @@ impl fmt::Display for ConfigError {
 
 impl From<io::Error> for ConfigError {
     fn from(err: io::Error) -> Self {
+        #[cfg(debug_assertions)]
+        if err.kind() == io::ErrorKind::NotFound {
+            panic!(
+                "use `ConfigError::FileNotFound` for missing config file, not `ConfigError::Io`"
+            );
+        }
+
         Self::Io(err)
     }
 }
