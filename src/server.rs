@@ -514,7 +514,7 @@ impl<L: Logger> Server<L> {
 ///  - `key`
 ///
 /// ### Default attributes & values
-///  - `address` defaults to `0.0.0.0` (lan)
+///  - `addr` defaults to `0.0.0.0` (lan)
 ///
 /// # Example
 ///
@@ -555,7 +555,7 @@ impl Config {
         Self::default()
     }
 
-    /// Update this `Config` from a `config.toml` in the current directory.
+    /// Updates this `Config` from a `config.toml` in the current directory.
     ///
     /// Note that the `addr` attribute is called `address` in `config.toml`.
     ///
@@ -599,7 +599,7 @@ impl Config {
         self.from_specific_file(dir)
     }
 
-    /// Update this `Config` from a `.toml` file.
+    /// Updates this `Config` from a `.toml` file.
     ///
     /// Note that the `addr` attribute is called `address` in the toml file.
     ///
@@ -650,13 +650,26 @@ impl Config {
             }
             Err(e) => return Err(ConfigError::Io(e)),
         };
-        let new: Self = toml::from_str(&file_content)?;
+        let new = Config::new().from_toml(&file_content)?;
 
         self.addr = new.addr.or(self.addr);
         self.port = new.port.or(self.port);
         self.key = new.key.or(self.key);
 
         Ok(self)
+    }
+
+    /// Updates this `Config` from a toml-formatted string.
+    ///
+    /// If an attribute is set on this `Config` and isn't in the toml string, it's value will be
+    /// maintained. In other words, you can intermix reading config attributes from toml and setting
+    /// them in code. Config attributes that have defaults will still use those defaults as normal
+    /// if they aren't specified in the file or on the struct.
+    ///
+    /// See the `Config::from_config_file`'s doc for details on field names.
+    #[allow(clippy::wrong_self_convention)]
+    pub fn from_toml(self, s: &str) -> Result<Self, ConfigError> {
+        toml::from_str(s).map_err(ConfigError::from)
     }
 
     /// Gets the socket address of this `Config`.
