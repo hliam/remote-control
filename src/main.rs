@@ -10,6 +10,8 @@ use std::io;
 use server::DummyLogger;
 use server::{Logger, MapResponse, Response, ResultExt, Server};
 
+// TODO: add encryption and better (encryption-bases) authentication
+
 fn main() {
     let err = run().unwrap_err();
 
@@ -68,7 +70,7 @@ impl DebugLogger {
     /// For example: `[11:30:15 connection refused] key is invalid`
     fn print(title: &str, msg: &impl Display, color: Color) {
         println!(
-            "[{}{} {title}\x1b[0m] {msg}",
+            "[\x1b[{}m{} {title}\x1b[0m] {msg}",
             color.ansii_code(),
             chrono::Local::now().format("%-H:%M:%S")
         );
@@ -76,6 +78,20 @@ impl DebugLogger {
 }
 
 impl server::Logger for DebugLogger {
+    fn started_listening(&self, sock_addr: std::net::SocketAddrV4) {
+        Self::print(
+            "started listening",
+            &format!("on {}", sock_addr),
+            Color::BrightGreen,
+        );
+    }
+    fn got_connection(&self, from: std::net::SocketAddr, to_path: &str) {
+        Self::print(
+            "got connection",
+            &format!("from {from} to {to_path}"),
+            Color::Blue,
+        );
+    }
     fn info(&self, msg: &impl Display) {
         Self::print("info", msg, Color::Blue);
     }
@@ -89,15 +105,17 @@ impl server::Logger for DebugLogger {
 
 enum Color {
     Blue,
+    BrightGreen,
     BrightRed,
     Red,
 }
 impl Color {
     fn ansii_code(&self) -> &str {
         match self {
-            Self::Blue => "\x1b[34m",
-            Self::BrightRed => "\x1b[91m",
-            Self::Red => "\x1b[31m",
+            Self::Blue => "34",
+            Self::BrightGreen => "92",
+            Self::BrightRed => "91",
+            Self::Red => "31",
         }
     }
 }

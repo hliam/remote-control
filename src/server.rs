@@ -5,14 +5,12 @@ use std::convert::{TryFrom, TryInto};
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
-
-// TODO: add more granular logging
 
 trait DurationExt {
     /// The amount of time elapsed since the unix epoch.
@@ -70,7 +68,12 @@ impl<T, E: Into<Response>> MapResponse<T> for Result<T, E> {
 
 /// A trait to be implemented by loggers to log server events.
 pub trait Logger: fmt::Debug {
-    /// Logs general information about the server such as listening on a port.
+    /// Logs that the server started listening on a socket address.
+    fn started_listening(&self, sock_addr: SocketAddrV4);
+    /// Logs that a new connection was received.
+    fn got_connection(&self, from: SocketAddr, to_path: &str);
+    /// Logs general information about the server.
+    #[allow(dead_code)]
     fn info(&self, msg: &impl fmt::Display);
     /// Logs that a connection was closed outside of normal circumstance, such as for an invalid key.
     fn connection_refused(&self, msg: &impl fmt::Display);
@@ -90,6 +93,8 @@ impl DummyLogger {
     }
 }
 impl Logger for DummyLogger {
+    fn started_listening(&self, _: SocketAddrV4) {}
+    fn got_connection(&self, _: SocketAddr, _: &str) {}
     fn info(&self, _: &impl fmt::Display) {}
     fn connection_refused(&self, _: &impl fmt::Display) {}
     fn server_error(&self, _: &impl fmt::Display) {}
@@ -439,7 +444,7 @@ impl<L: Logger> Server<L> {
         let mut nonce = Nonce::new(Duration::from_secs(2));
         let listener = TcpListener::bind(self.addr)?;
 
-        self.logger.info(&format!("Listening on {}", self.addr));
+        self.logger.started_listening(self.addr);
 
         for stream in listener.incoming() {
             let Ok(mut stream) = stream.log_connection_refused(&self.logger) else {
@@ -489,11 +494,8 @@ impl<L: Logger> Server<L> {
                 None
             }
             Ok(request) => {
-                self.logger.info(&format!(
-                    "Got connection from {} to {}",
-                    stream.peer_addr()?,
-                    request.path
-                ));
+                self.logger
+                    .got_connection(stream.peer_addr()?, &request.path);
                 Some(request)
             }
         })
@@ -1172,7 +1174,10 @@ mod tests {
         let port = 1337;
         let key = Key::new("this is a key and it's 32 bytes.").unwrap();
 
-        let config = Server::builder().with_addr(ip).with_port(port).with_key(key.clone());
+        let config = Server::builder()
+            .with_addr(ip)
+            .with_port(port)
+            .with_key(key.clone());
         assert_eq!(config.addr, Some(ip));
         assert_eq!(config.port, Some(port));
         assert_eq!(config.key, Some(key.clone()));
