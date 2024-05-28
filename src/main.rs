@@ -32,10 +32,15 @@ fn run() -> Result<(), Box<dyn error::Error>> {
     #[cfg(not(debug_assertions))]
     let logger = DummyLogger {};
 
+    // TODO: clean up the results and errors here
     Server::from_config_file(logger)?
         .run(|r| match r.path.as_str() {
             "/minimize" => util::minimize_windows()
-                .inspect_err(|e| logger.server_error(&format!("Failed to minimize windows; {e}")))
+                .inspect_err(|e| logger.server_error(&format!("Failed to minimize windows: {e}")))
+                .to_status_response(500),
+
+            "/lock_screen" => util::lock_the_screen()
+                .inspect_err(|e| logger.server_error(e))
                 .to_status_response(500),
 
             "/ping" => Response::from_status(200),
@@ -47,7 +52,7 @@ fn run() -> Result<(), Box<dyn error::Error>> {
 
             "/sleep_display" => util::sleep_display()
                 .inspect_err(|e| {
-                    logger.server_error(&format!("Failed to sleep display; {e}"));
+                    logger.server_error(&format!("Failed to sleep display: {e}"));
                 })
                 .to_status_response(500),
 

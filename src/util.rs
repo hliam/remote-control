@@ -1,5 +1,5 @@
 //! Underlying utilities for interacting with the operating system.
-//! 
+//!
 //! This module handles the actual actions of requests made to the server.
 
 use std::os::windows::prelude::OsStrExt;
@@ -83,6 +83,26 @@ pub fn sleep_display() -> Result<(), ProcessNotRunningError> {
     get_desktop_window_hwnd().map(|hwnd| unsafe {
         hwnd.post_message(winuser::WM_SYSCOMMAND, winuser::SC_MONITORPOWER, 2);
     })
+}
+
+/// Locks the screen.
+pub fn lock_the_screen() -> Result<(), LockScreenError> {
+    unsafe {
+        if winuser::LockWorkStation() == 0 {
+            Err(LockScreenError {})
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub struct LockScreenError;
+impl std::error::Error for LockScreenError {}
+impl fmt::Display for LockScreenError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("failed to lock the screen")
+    }
 }
 
 /// Minimizes all open windows.
