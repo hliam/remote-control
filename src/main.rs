@@ -61,6 +61,8 @@ fn run() -> Result<(), Box<dyn error::Error>> {
         .map_err(Into::into)
 }
 
+// We allow dead code because there'll be warnings when compiling in release mode otherwise.
+#[allow(dead_code)]
 #[derive(Debug, Copy, Clone)]
 struct DebugLogger;
 
@@ -68,6 +70,7 @@ impl DebugLogger {
     /// Prints a log entry.
     ///
     /// For example: `[11:30:15 connection refused] key is invalid`
+    #[allow(dead_code)]
     fn print(title: &str, msg: &impl Display, color: Color) {
         println!(
             "[\x1b[{}m{} {title}\x1b[0m] {msg}",
@@ -103,6 +106,7 @@ impl server::Logger for DebugLogger {
     }
 }
 
+#[allow(dead_code)]
 enum Color {
     Blue,
     BrightGreen,
