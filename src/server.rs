@@ -81,18 +81,7 @@ pub trait Logger: fmt::Debug {
     fn server_error(&self, msg: &impl fmt::Display);
 }
 
-/// A dummy logger for `server::Server` which does nothing and drops all logs.
-#[derive(Debug, Copy, Clone)]
-pub struct DummyLogger;
-impl DummyLogger {
-    /// Make a new `DummyLogger`.
-    #[allow(dead_code)]
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {}
-    }
-}
-impl Logger for DummyLogger {
+impl Logger for () {
     fn started_listening(&self, _: SocketAddrV4) {}
     fn got_connection(&self, _: SocketAddr, _: &str) {}
     fn info(&self, _: &impl fmt::Display) {}
@@ -372,7 +361,7 @@ impl fmt::Display for NonceError {
 /// The server only handles the actual networking and has no knowledge of their content beyond
 /// authorization.
 #[derive(Debug)]
-pub struct Server<L: Logger> {
+pub struct Server<L: Logger = ()> {
     /// The socket address to listen on.
     pub addr: SocketAddrV4,
     /// The key to used to validate the connection.
@@ -386,9 +375,9 @@ pub struct Server<L: Logger> {
     pub logger: L,
 }
 
-// The config methods need a concrete type for logger, so we use the dummy logger as a dummy type.
-// The logger isn't actually relevant here.
-impl Server<DummyLogger> {
+// The config methods need a concrete type for logger (to avoid having to specify it when calling
+// `builder`), so we use unit as a dummy type. The logger itself isn't actually relevant here.
+impl Server<()> {
     /// Creates a builder for the server config.
     ///
     /// # Example
@@ -1183,7 +1172,7 @@ mod tests {
         assert_eq!(config.key, Some(key.clone()));
 
         let server = config
-            .build(DummyLogger::new())
+            .build(())
             .expect("failed to build config into server");
         assert_eq!(server.addr, SocketAddrV4::new(ip, port));
         assert_eq!(server.key, key);
@@ -1193,7 +1182,7 @@ mod tests {
         let server = Server::builder()
             .with_port(port)
             .with_key(key)
-            .build(DummyLogger::new())
+            .build(())
             .expect("failed to build config into server");
 
         assert_eq!(server.addr, SocketAddrV4::new(ip, port));
@@ -1282,7 +1271,7 @@ mod tests {
         let mut client = ClientMock::from_config(config.clone());
         let server = config
             .clone()
-            .build(DummyLogger::new())
+            .build(())
             .expect("failed to build server from config");
 
         let server_res = std::thread::spawn(move || {

@@ -6,8 +6,6 @@ use std::error;
 use std::fmt::Display;
 use std::io;
 
-#[cfg(not(debug_assertions))]
-use server::DummyLogger;
 use server::{Logger, MapResponse, Response, ResultExt, Server};
 
 // TODO: add encryption and better (encryption-bases) authentication
@@ -30,7 +28,7 @@ fn run() -> Result<(), Box<dyn error::Error>> {
     #[cfg(debug_assertions)]
     let logger = DebugLogger {};
     #[cfg(not(debug_assertions))]
-    let logger = DummyLogger {};
+    let logger = ();
 
     // TODO: clean up the results and errors here
     Server::from_config_file(logger)?
