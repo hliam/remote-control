@@ -67,6 +67,8 @@ impl<T, E: Into<Response>> MapResponse<T> for Result<T, E> {
 }
 
 /// A trait to be implemented by loggers to log server events.
+///
+/// Use `()` as a logger if you don't want to log anything (this is the default).
 pub trait Logger: fmt::Debug {
     /// Logs that the server started listening on a socket address.
     fn started_listening(&self, sock_addr: SocketAddrV4);
@@ -277,7 +279,7 @@ impl<'de> Deserialize<'de> for Key {
         D: serde::Deserializer<'de>,
     {
         struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
+        impl serde::de::Visitor<'_> for Visitor {
             type Value = Key;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str("a valid key")
@@ -710,7 +712,7 @@ impl Config {
     /// ```
     pub fn build<L: Logger>(self, logger: L) -> Result<Server<L>, ConfigError> {
         let key = self.key.ok_or(ConfigError::MissingRequired("key"))?;
-        let addr = self.addr.unwrap_or_else(|| Ipv4Addr::new(0, 0, 0, 0));
+        let addr = self.addr.unwrap_or(Ipv4Addr::new(0, 0, 0, 0));
         let port = self.port.ok_or(ConfigError::MissingRequired("port"))?;
 
         Ok(Server {
