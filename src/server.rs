@@ -177,10 +177,15 @@ mod private {
             &mut self,
             new_nonce: u128,
         ) -> Result<NonceValidityWitness, NonceError> {
+            println!(
+                "     current nonce: {}\nattempted new none: {}",
+                self.inner, new_nonce
+            );
+
             if new_nonce <= self.inner {
-                Err(NonceError::FromPast)
+                Err(NonceError::new_from_past(self.inner, new_nonce))
             } else if new_nonce > (Duration::since_unix_epoch() + self.leeway).as_millis() {
-                Err(NonceError::FromFuture)
+                Err(NonceError::new_from_future(self.inner, new_nonce))
             } else {
                 Ok(NonceValidityWitness(self, new_nonce))
             }
@@ -210,7 +215,7 @@ mod private {
         use std::time::Duration;
 
         use super::{
-            super::{DurationExt, NonceError},
+            super::{DurationExt, NonceErrorKind},
             Nonce,
         };
 
@@ -223,12 +228,12 @@ mod private {
             };
 
             assert_eq!(
-                nonce.begin_update(now - 1).unwrap_err(),
-                NonceError::FromPast
+                nonce.begin_update(now - 1).unwrap_err().kind,
+                NonceErrorKind::FromPast
             );
             assert_eq!(
-                nonce.begin_update(now + 5000).unwrap_err(),
-                NonceError::FromFuture
+                nonce.begin_update(now + 5000).unwrap_err().kind,
+                NonceErrorKind::FromFuture
             );
             nonce.begin_update(now + 1).unwrap().commit();
             assert_eq!(nonce.inner, now + 1);
@@ -327,7 +332,30 @@ impl fmt::Display for KeyError {
 
 /// An error with a received nonce.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum NonceError {
+pub struct NonceError {
+    kind: NonceErrorKind,
+    by_amount: Duration,
+}
+
+impl NonceError {
+    pub fn new_from_past(current: u128, attempted_new: u128) -> Self {
+        Self {
+            kind: NonceErrorKind::FromPast,
+            by_amount: Duration::from_millis((current - attempted_new) as u64),
+        }
+    }
+
+    pub fn new_from_future(current: u128, attempted_new: u128) -> Self {
+        Self {
+            kind: NonceErrorKind::FromFuture,
+            by_amount: Duration::from_millis((attempted_new - current) as u64),
+        }
+    }
+}
+
+/// Whether the nonce is from the past or too far in the future.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum NonceErrorKind {
     /// This occurs when the received nonce is from before the last used nonce.
     FromPast,
     /// This occurs when the received nonce is from further into the future than the `Nonce`'s
@@ -335,24 +363,21 @@ pub enum NonceError {
     FromFuture,
 }
 
-impl From<&NonceError> for &str {
-    #[must_use]
-    fn from(value: &NonceError) -> Self {
-        use NonceError::*;
-
-        match value {
-            FromPast => "nonce is too old; are server and client clocks out of sync?",
-            FromFuture => {
-                "nonce is from too far in the future; are server and client clocks out of sync?"
-            }
-        }
-    }
-}
-
 impl Error for NonceError {}
 impl fmt::Display for NonceError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.into())
+        use NonceErrorKind::*;
+
+        let partial_msg = match self.kind {
+            FromPast => "too old",
+            FromFuture => "from too far in the future",
+        };
+
+        write!(
+            f,
+            "nonce is {partial_msg} ({:.1} secs); are server and client clocks out of sync?",
+            self.by_amount.as_secs_f32()
+        )
     }
 }
 
@@ -399,6 +424,8 @@ impl Server<()> {
         Config::new()
     }
 }
+
+// todo: refactor with `Connection` struct
 
 // TODO: clean this up. the server stuff and the config stuff (do they really need to be separate?)
 impl<L: Logger> Server<L> {
