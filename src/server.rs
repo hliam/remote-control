@@ -17,7 +17,6 @@ trait DurationExt {
     fn since_unix_epoch() -> Self;
 }
 impl DurationExt for Duration {
-    #[must_use]
     fn since_unix_epoch() -> Self {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -176,7 +175,7 @@ mod private {
         pub fn begin_update(
             &mut self,
             new_nonce: u128,
-        ) -> Result<NonceValidityWitness, NonceError> {
+        ) -> Result<NonceValidityWitness<'_>, NonceError> {
             println!(
                 "     current nonce: {}\nattempted new none: {}",
                 self.inner, new_nonce
@@ -1051,7 +1050,6 @@ impl fmt::Display for RequestError {
 
 impl From<NonceError> for RequestError {
     /// Creates a `RequestError::NonceError` from a `NonceError`.
-    #[must_use]
     fn from(value: NonceError) -> Self {
         Self::NonceError(value)
     }
@@ -1059,7 +1057,6 @@ impl From<NonceError> for RequestError {
 
 impl From<&RequestError> for Response {
     /// Creates an error `Response` from a `RequestError` that indicated the error.
-    #[must_use]
     fn from(value: &RequestError) -> Self {
         let status = match value {
             RequestError::InvalidKey => 401,
