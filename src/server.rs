@@ -477,7 +477,7 @@ impl<L: Logger> Server<L> {
                     .shutdown(Shutdown::Both)
                     .log_connection_refused(&self.logger);
                 continue;
-            };
+            }
 
             self.validate_connection(&mut stream, &mut buf, &mut nonce)
                 .log_connection_refused(&self.logger)
@@ -780,7 +780,7 @@ impl Config {
     /// ```
     #[allow(dead_code)]
     pub fn on_localhost(self) -> Self {
-        self.with_addr(Ipv4Addr::new(127, 0, 0, 1))
+        self.with_addr(Ipv4Addr::LOCALHOST)
     }
     /// Sets the ip address of this `Config` to lan (`0.0.0.0`).
     ///
@@ -881,9 +881,8 @@ pub enum ConfigError {
 impl Error for ConfigError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::MissingRequired(_) => None,
+            Self::MissingRequired(_) | Self::FileNotFound(_) => None,
             Self::Io(e) => Some(e),
-            Self::FileNotFound(_) => None,
             Self::Toml(e) => Some(e),
         }
     }
@@ -901,11 +900,10 @@ impl fmt::Display for ConfigError {
 impl From<io::Error> for ConfigError {
     fn from(err: io::Error) -> Self {
         #[cfg(debug_assertions)]
-        if err.kind() == io::ErrorKind::NotFound {
-            panic!(
-                "use `ConfigError::FileNotFound` for missing config file, not `ConfigError::Io`"
-            );
-        }
+        assert!(
+            err.kind() != io::ErrorKind::NotFound,
+            "use `ConfigError::FileNotFound` for missing config file, not `ConfigError::Io`"
+        );
 
         Self::Io(err)
     }
@@ -1185,7 +1183,7 @@ mod tests {
 
     #[test]
     fn test_config_building_in_code() {
-        let ip = Ipv4Addr::new(0, 0, 0, 0);
+        let ip = Ipv4Addr::UNSPECIFIED;
         let port = 1337;
         let key = Key::new("this is a key and it's 32 bytes.").unwrap();
 
@@ -1222,7 +1220,7 @@ mod tests {
             key = \"this is a key and it's 32 bytes.\"";
 
         let config = Config::new().from_toml(toml).expect("failed to parse toml");
-        assert_eq!(config.addr, Some(Ipv4Addr::new(0, 0, 0, 0)));
+        assert_eq!(config.addr, Some(Ipv4Addr::UNSPECIFIED));
         assert_eq!(config.port, Some(1337));
         assert_eq!(
             config.key,

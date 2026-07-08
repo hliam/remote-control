@@ -87,7 +87,7 @@ impl server::Logger for DebugLogger {
     fn started_listening(&self, sock_addr: std::net::SocketAddrV4) {
         Self::print(
             "started listening",
-            &format!("on {}", sock_addr),
+            &format!("on {sock_addr}"),
             Color::BrightGreen,
         );
     }
@@ -110,6 +110,7 @@ impl server::Logger for DebugLogger {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 enum Color {
     Blue,
     BrightGreen,
