@@ -12,7 +12,7 @@ no_term = []
 chrono = "0.4"
 hex = "0.4"
 screenshots = "0.8"
-serde = { version = "1.0.201", features = ["derive"] }
-sha2 = "0.10"
-toml = "0.8.12"
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.11"
+toml = "1.1"
 winapi = { version = "0.3", features = ["powrprof", "winuser"] }

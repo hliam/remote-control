@@ -8,7 +8,7 @@ use std::io;
 
 use server::{Logger, MapResponse, Response, ResultExt, Server};
 
-// TODO: add encryption and better (encryption-bases) authentication
+// TODO: add encryption and better (encryption-based) authentication
 
 fn main() {
     let err = run().unwrap_err();
